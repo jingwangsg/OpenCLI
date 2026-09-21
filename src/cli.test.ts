@@ -743,7 +743,7 @@ describe('createProgram root help descriptions', () => {
 
       expect(data).toMatchObject({
         namespace: 'profile',
-        description: 'Manage Browser Bridge Chrome profiles',
+        description: 'Manage Browser Bridge browser profiles',
         command_count: 3,
       });
       expect(data.commands.map((cmd: any) => cmd.name)).toEqual(['list', 'rename', 'use']);

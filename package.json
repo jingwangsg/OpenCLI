@@ -42,6 +42,7 @@
     "!**/__fixtures__/"
   ],
   "scripts": {
+    "edge": "sh scripts/open-edge-macos.sh",
     "dev": "tsx src/main.ts",
     "dev:bun": "bun src/main.ts",
     "build": "npm run clean-dist && npm run copy-yaml && npm run build-manifest",

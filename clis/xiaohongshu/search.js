@@ -362,7 +362,8 @@ function buildApplySearchFiltersJs(requestedFilters) {
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         const text = (element) => (element?.textContent || '').replace(/\\s+/g, '').trim();
         const visible = (element) => {
-          if (!element) return false;
+          // Hidden duplicate chips can have the same text and geometry as the real option.
+          if (!element || element.closest('[aria-hidden="true"]')) return false;
           const rect = element.getBoundingClientRect();
           const style = getComputedStyle(element);
           return rect.width > 0 && rect.height > 0 &&

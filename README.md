@@ -40,15 +40,31 @@ npm install -g @jackwener/opencli
 
 ### 2. Install the Browser Bridge Extension
 
-OpenCLI connects to Chrome/Chromium through a lightweight Browser Bridge extension plus a small local daemon. The daemon auto-starts when needed.
+OpenCLI connects to Chrome, Microsoft Edge, or Chromium through a lightweight Browser Bridge extension plus a small local daemon. The daemon auto-starts when needed.
 
 **Option A — Chrome Web Store (recommended):**
 Install **OpenCLI** from the [Chrome Web Store](https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk).
 
 **Option B — Manual install:**
 1. Download the latest `opencli-extension-v{version}.zip` from the GitHub [Releases page](https://github.com/jackwener/opencli/releases).
-2. Unzip it, open `chrome://extensions`, and enable **Developer mode**.
+2. Unzip it, open `chrome://extensions` (or `edge://extensions` in Microsoft Edge), and enable **Developer mode**.
 3. Click **Load unpacked** and select the unzipped folder.
+
+**Microsoft Edge on macOS, from this source checkout:**
+
+```bash
+npm ci
+npm --prefix extension ci
+npm --prefix extension run build
+npm link
+npm run edge -- https://www.xiaohongshu.com
+```
+
+This starts Edge with the local extension and a persistent profile at
+`~/.opencli/edge-profile`. Log into websites in that window. Reopen it with
+`npm run edge`; existing personal Edge windows use their own profiles. If several
+Browser Bridge profiles are connected, select this one with `opencli profile use
+<contextId>` after checking `opencli profile list`.
 
 ### 3. Verify the setup
 

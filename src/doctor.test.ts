@@ -365,7 +365,7 @@ describe('doctor report rendering', () => {
 
     expect(report.profiles).toHaveLength(2);
     expect(report.issues).toEqual(expect.arrayContaining([
-      expect.stringContaining('Multiple Chrome profiles are connected'),
+      expect.stringContaining('Multiple browser profiles are connected'),
     ]));
   });
 });

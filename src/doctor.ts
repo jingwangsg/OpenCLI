@@ -131,26 +131,26 @@ export async function runBrowserDoctor(opts: DoctorOptions = {}): Promise<Doctor
   if (extensionFlaky) {
     issues.push(
       'Extension connection is unstable. The live browser test succeeded, but the daemon reported the extension disconnected immediately afterward.\n' +
-      'This usually means the Browser Bridge service worker is reconnecting slowly or Chrome suspended it.',
+      'This usually means the Browser Bridge service worker is reconnecting slowly or the browser suspended it.',
     );
   } else if (daemonRunning && !extensionConnected) {
     if (health.state === 'profile-required') {
       issues.push(
-        'Multiple Chrome profiles are connected to the daemon, but no default profile was selected.\n' +
+        'Multiple browser profiles are connected to the daemon, but no default profile was selected.\n' +
         '  Run opencli profile list, then opencli profile use <name>, or pass --profile <name>.',
       );
     } else if (health.state === 'profile-disconnected') {
       issues.push(
         `Selected browser profile is not connected: ${health.status?.contextId ?? 'unknown'}.\n` +
-        '  Open that Chrome profile and make sure the OpenCLI extension is enabled.',
+        '  Open that browser profile and make sure the OpenCLI extension is enabled.',
       );
     } else {
       issues.push(
-        'Daemon is running but the Chrome/Chromium extension is not connected.\n' +
+        'Daemon is running but the Browser Bridge extension is not connected.\n' +
         'If the extension is already installed, try: opencli daemon restart\n' +
         'If the extension is not installed:\n' +
         '  1. Download from https://github.com/jackwener/opencli/releases\n' +
-        '  2. Open chrome://extensions/ → Enable Developer Mode\n' +
+        '  2. Open chrome://extensions/ (Edge: edge://extensions/) → Enable Developer Mode\n' +
         '  3. Click "Load unpacked" → select the extension folder',
       );
     }

@@ -175,6 +175,14 @@ function createFilterBehaviorPage(options = {}) {
                     container.append(option);
                     markVisible(option);
                     markVisible(optionLabel);
+                    if (options.hiddenDuplicates) {
+                        const hiddenOption = option.cloneNode(true);
+                        hiddenOption.setAttribute('aria-hidden', 'true');
+                        hiddenOption.tabIndex = -1;
+                        hiddenOption.style.opacity = '0.00001';
+                        container.prepend(hiddenOption);
+                        markVisible(hiddenOption);
+                    }
                 }
             }
             group.append(container);
@@ -696,6 +704,20 @@ describe('xiaohongshu search filter behavior', () => {
                 '发布时间': '一天内',
                 '搜索范围': '已关注',
             });
+        }
+        finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('applies filters when hidden duplicate chips have the same text and geometry', async () => {
+        vi.useFakeTimers();
+        try {
+            const page = createFilterBehaviorPage({ hiddenDuplicates: true });
+            const result = await runFilterCommand(page, { sort: 'latest', 'publish-time': 'week' });
+            expect(result[0].title).toBe('最新');
+            expect(page.filterState).toMatchObject({ '排序依据': '最新', '发布时间': '一周内' });
+            expect(page.filterClicks).toEqual(['排序依据/最新', '发布时间/一周内']);
         }
         finally {
             vi.useRealTimers();

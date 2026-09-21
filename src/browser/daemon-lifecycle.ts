@@ -149,8 +149,8 @@ export async function ensureBrowserBridgeReady(
     }
     daemonLifecycleHooks.spawnDaemonProcess();
   } else if (verbose && (process.env.OPENCLI_VERBOSE || process.stderr.isTTY)) {
-    process.stderr.write('⏳ Waiting for Chrome/Chromium extension to connect...\n');
-    process.stderr.write('   Make sure Chrome or Chromium is open and the OpenCLI extension is enabled.\n');
+    process.stderr.write('⏳ Waiting for Browser Bridge extension to connect...\n');
+    process.stderr.write('   Make sure Chrome, Edge, or Chromium is open and the OpenCLI extension is enabled.\n');
   }
 
   const finalHealth = await waitForBridgeReady(getDaemonHealth, { timeoutMs, contextId, preferredContextId });
@@ -171,17 +171,17 @@ function browserConnectErrorFromHealth(health: DaemonHealth, contextId?: string)
     const label = contextId ?? health.status.contextId ?? 'unknown';
     return new BrowserConnectError(
       `Browser profile "${label}" is not connected`,
-      'Open the matching Chrome profile and make sure the OpenCLI extension is enabled, or choose another profile with opencli profile use <name>.',
+      'Open the matching browser profile and make sure the OpenCLI extension is enabled, or choose another profile with opencli profile use <name>.',
       'profile-disconnected',
     );
   }
   if (health.state === 'no-extension') {
     return new BrowserConnectError(
       'Browser Bridge extension not connected',
-      'Make sure Chrome/Chromium is open and the OpenCLI extension is enabled.\n' +
+      'Make sure Chrome, Edge, or Chromium is open and the OpenCLI extension is enabled.\n' +
       'If not installed:\n' +
       '  1. Download: https://github.com/jackwener/opencli/releases\n' +
-      '  2. Open chrome://extensions → Developer Mode → Load unpacked',
+      '  2. Open chrome://extensions (Edge: edge://extensions) → Developer Mode → Load unpacked',
       'extension-not-connected',
     );
   }

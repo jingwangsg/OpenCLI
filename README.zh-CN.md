@@ -39,15 +39,30 @@ npm install -g @jackwener/opencli
 
 ### 2. 安装 Browser Bridge 扩展
 
-OpenCLI 通过轻量 Browser Bridge 扩展和本地微型 daemon 与 Chrome/Chromium 通信。daemon 会按需自动启动。
+OpenCLI 通过轻量 Browser Bridge 扩展和本地微型 daemon 与 Chrome、Microsoft Edge 或 Chromium 通信。daemon 会按需自动启动。
 
 **方式 A — Chrome Web Store（推荐）：**
 在 [Chrome Web Store](https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk) 安装 **OpenCLI** 扩展。
 
 **方式 B — 手动安装：**
 1. 到 GitHub [Releases 页面](https://github.com/jackwener/opencli/releases) 下载最新的 `opencli-extension-v{version}.zip`。
-2. 解压后打开 `chrome://extensions`，启用 **开发者模式**。
+2. 解压后打开 `chrome://extensions`（Microsoft Edge 使用 `edge://extensions`），启用 **开发者模式**。
 3. 点击 **加载已解压的扩展程序**，选择解压后的目录。
+
+**macOS 从源码启动 Microsoft Edge：**
+
+```bash
+npm ci
+npm --prefix extension ci
+npm --prefix extension run build
+npm link
+npm run edge -- https://www.xiaohongshu.com
+```
+
+此命令加载本地扩展，使用 `~/.opencli/edge-profile` 持久保存浏览器配置和登录态。
+请在这个窗口登录目标网站；以后用 `npm run edge` 重新打开。个人 Edge 窗口使用各自的配置。
+如果连接了多个 Browser Bridge 配置，先用 `opencli profile list` 查看，再用
+`opencli profile use <contextId>` 选择这个 Edge 配置。
 
 ### 3. 验证环境
 

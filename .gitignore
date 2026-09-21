@@ -3,6 +3,13 @@ dist/
 !extension/dist/
 *.tsbuildinfo
 .opencli/
+# Keep the Singapore workflow scripts alongside their local research inputs.
+!/.opencli/
+/.opencli/*
+!/.opencli/singapore-2026-09-21/
+/.opencli/singapore-2026-09-21/*
+!/.opencli/singapore-2026-09-21/*.py
+!/.opencli/singapore-2026-09-21/README.md
 .worktrees/
 .mcp.json
 *.log

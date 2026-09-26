@@ -6,7 +6,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import BaseDocTemplate,PageTemplate,Frame,Paragraph,Spacer,PageBreak,LongTable,TableStyle,CondPageBreak
+from reportlab.platypus import BaseDocTemplate,PageTemplate,Frame,Paragraph,Spacer,PageBreak,LongTable,TableStyle,CondPageBreak,KeepTogether
 from reportlab.platypus.tableofcontents import TableOfContents
 
 ROOT=Path('/Users/jingwang/WORKSPACE')
@@ -74,7 +74,7 @@ def page_decoration(canvas,doc):
     canvas.setFont('CJK',8)
     if doc.page>1:
         canvas.drawString(MARGIN,H-29,'新加坡吃喝玩乐攻略')
-        canvas.drawRightString(W-MARGIN,H-29,'2026年9月21日')
+        canvas.drawRightString(W-MARGIN,H-29,'2026年9月26日')
         canvas.setStrokeColor(colors.HexColor('#d9e2e7'))
         canvas.line(MARGIN,H-36,W-MARGIN,H-36)
     canvas.setFont('CJK',8)
@@ -105,19 +105,30 @@ marker=''
 heading_count=0
 inserted_toc=False
 in_sources=False
+in_east=False
+entry_start=None
+entry_has_heading=False
 i=0
 while i<len(tokens):
     t=tokens[i];typ=t['type']
     if typ=='heading_open':
         level=int(t['tag'][1:]);children=tokens[i+1].get('children',[])
         raw=''.join(c.get('content','') for c in children if c['type'] in ('text','code_inline'))
+        if entry_start is not None and (level!=4 or entry_has_heading):
+            story[entry_start:]=[KeepTogether(story[entry_start:])]
+            entry_start=None
+            entry_has_heading=False
         if level==2:
+            in_east=raw.startswith('东部与 Bugis')
             if not inserted_toc:
                 story.extend([PageBreak(),Paragraph('目录',styles[2]),Paragraph('点击目录条目跳转；PDF书签也可用于快速导航。',body),Spacer(1,5),toc,PageBreak()])
                 inserted_toc=True
             else:story.append(PageBreak())
         elif raw.startswith('重点推荐二：') or raw=='其他地标与玩法速查':story.append(PageBreak())
-        elif level>=3:story.append(CondPageBreak(100 if level==4 else 125))
+        elif level>=3 and not (in_east and level==4):story.append(CondPageBreak(100 if level==4 else 125))
+        if in_east and level in (3,4):
+            if entry_start is None:entry_start=len(story)
+            if level==4:entry_has_heading=True
         p=Paragraph(inline(children),styles[level])
         if level>=2:
             p.toc_key=f'section-{heading_count}';p.toc_text=raw;p.toc_level=level-2;heading_count+=1

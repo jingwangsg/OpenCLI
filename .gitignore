@@ -10,6 +10,10 @@ dist/
 /.opencli/singapore-2026-09-21/*
 !/.opencli/singapore-2026-09-21/*.py
 !/.opencli/singapore-2026-09-21/README.md
+!/.opencli/singapore-2026-09-26/
+/.opencli/singapore-2026-09-26/*
+!/.opencli/singapore-2026-09-26/*.py
+!/.opencli/singapore-2026-09-26/README.md
 .worktrees/
 .mcp.json
 *.log

@@ -478,6 +478,39 @@ if operation == "status" {
            "file_picker_open": filePickerOpen]])
     exit(0)
 }
+if operation == "reset" {
+    guard let app = running, let window = openWindow(app) else {
+        fail("no accessible WhatsApp window; check for an update dialog")
+    }
+    if let input = composer(window), !string(input, kAXValueAttribute as String).isEmpty {
+        fail("chat has an unsent draft; clear it before resetting WhatsApp")
+    }
+    guard app.terminate(), poll(seconds: 10, { app.isTerminated ? true : nil }) != nil else {
+        fail("WhatsApp did not quit")
+    }
+    let launcher = Process()
+    launcher.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+    launcher.arguments = ["-a", "WhatsApp"]
+    do { try launcher.run(); launcher.waitUntilExit() } catch { fail("could not relaunch WhatsApp") }
+    guard launcher.terminationStatus == 0 else { fail("could not relaunch WhatsApp") }
+    let ready = { () -> [String: Any]? in
+        guard let reopened = NSRunningApplication.runningApplications(withBundleIdentifier: "net.whatsapp.WhatsApp").first,
+              let reopenedWindow = openWindow(reopened), chatRows(reopenedWindow) != nil,
+              let search = descendants(reopenedWindow).first(where: {
+                  string($0, kAXRoleAttribute as String) == "AXStaticText" &&
+                  clean(string($0, kAXDescriptionAttribute as String)) == "Search"
+              }), string(search, kAXValueAttribute as String).isEmpty else { return nil }
+        return ["chat": selectedChat(reopenedWindow)?.0 ?? "", "search_cleared": true]
+    }
+    guard poll(seconds: 15, ready) != nil else {
+        fail("WhatsApp reopened, but the chat list or cleared search was not verified")
+    }
+    // load-bearing: an update dialog can take over the window a few seconds after launch; re-verify after it would show.
+    RunLoop.current.run(until: Date().addingTimeInterval(5))
+    guard let state = ready() else { fail("WhatsApp restart did not remain usable; check for an update dialog") }
+    emit([state])
+    exit(0)
+}
 guard let app = running else { fail("desktop app is not running") }
 if openWindow(app) == nil {
     let launcher = Process()

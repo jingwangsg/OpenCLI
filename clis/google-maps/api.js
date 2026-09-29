@@ -107,12 +107,13 @@ export async function readList(page, id, account = '0') {
             authuser: account, pb: `!1m4!1s${id}!2e1!3m1!1e1!2e2!3e3!4i${list[12]}!8i3!16b1`,
         }))[0];
     }
-    if (list?.[0]?.[0] !== id || typeof list[4] !== 'string' || !Array.isArray(list[8]) ||
-        (list[5] != null && typeof list[5] !== 'string') || !Number.isSafeInteger(list[12]) || list[8].length !== list[12]) {
+    const entries = list?.[8] === null && list[12] === 0 ? [] : list?.[8];
+    if (list?.[0]?.[0] !== id || typeof list[4] !== 'string' || !Array.isArray(entries) ||
+        (list[5] != null && typeof list[5] !== 'string') || !Number.isSafeInteger(list[12]) || entries.length !== list[12]) {
         throw new CommandExecutionError('Google Maps list returned a different list, malformed metadata, or fewer items than its total count');
     }
     const seen = new Set();
-    const items = list[8].map((item, index) => {
+    const items = entries.map((item, index) => {
         const ids = item?.[1]?.[6];
         if (!Array.isArray(ids) || ids.length !== 2 || !ids.every((id) => typeof id === 'string' && /^-?\d+$/.test(id) &&
             BigInt(id) >= -(1n << 63n) && BigInt(id) < (1n << 64n)) ||

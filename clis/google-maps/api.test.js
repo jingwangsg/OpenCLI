@@ -86,6 +86,15 @@ describe('Google Maps JSON API commands', () => {
             .rejects.toMatchObject({ code: 'COMMAND_EXEC' });
     });
 
+    it('reads a newly created list whose zero items are encoded as null, but not null items with a nonzero count', async () => {
+        const list = []; list[0] = ['test-list-id']; list[4] = 'New list'; list[8] = null; list[12] = 0;
+        vi.stubGlobal('fetch', vi.fn(async () => response([list])));
+        expect(await getRegistry().get('google-maps/list').func(page(), { list: 'test-list-id' })).toEqual([]);
+        list[12] = 1;
+        await expect(getRegistry().get('google-maps/list').func(page(), { list: 'test-list-id' }))
+            .rejects.toMatchObject({ code: 'COMMAND_EXEC' });
+    });
+
     it('does not treat a GET mutation as an allowed read', async () => {
         const browser = page();
         await expect(readMapsApi(browser, '/maps/preview/entitylist/updateitem', {})).rejects.toMatchObject({ code: 'ARGUMENT' });

@@ -45586,6 +45586,23 @@
   },
   {
     "site": "whatsapp",
+    "name": "reset",
+    "description": "Quit and relaunch WhatsApp to clear a stuck search; refuses if the open chat has an unsent draft",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [],
+    "columns": [
+      "chat",
+      "search_cleared"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
     "name": "search",
     "description": "Search WhatsApp desktop chats and contacts without changing the open chat draft",
     "access": "read",

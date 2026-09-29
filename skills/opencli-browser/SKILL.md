@@ -187,6 +187,14 @@ as `receipt.pdf` when possible; an empty pattern waits for the next/recent
 download in the timeout window. The command reports `{downloaded, filename, url,
 state, elapsedMs}` on success and a JSON error envelope on timeout/failure.
 
+For a PDF open in a tab, the page DOM is only the viewer's `<embed>` shell:
+`state` and `extract` return no document text, and `network --detail` returns
+that shell rather than the file. Take the tab's URL from the `bind` output,
+fetch the file outside the browser, and check that it starts with `%PDF-` and
+reports a page count (e.g. `pdfinfo`) before reading it. If `curl` fails at
+HTTP/2 or stalls while the browser loads the PDF, a browser-impersonating
+client such as `curl_cffi` may work.
+
 ### Extract
 
 - **`web read --url <url>`** — One-shot Markdown reader for arbitrary pages. It expands relevant same-origin iframes by default, so old iframe-shell sites work better than with a top-document-only scrape. Use `--frames all-same-origin` when completeness matters more than Markdown noise. For AJAX shell pages use `opencli web read --url <url> --wait-for "<selector>" --wait-until networkidle --diagnose`; diagnostics show frame URLs, empty containers, and API-like XHRs. If the value you need is table/API data, switch to `browser network` or a dedicated adapter instead of relying on Markdown.

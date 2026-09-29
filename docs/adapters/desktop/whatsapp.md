@@ -11,9 +11,10 @@ opencli whatsapp read --limit 30 -f json
 opencli whatsapp read --phone 6588004444 --limit 30 -f json
 opencli whatsapp open 6588004444 -f json
 opencli whatsapp search 'Alex' -f json
+opencli whatsapp reset -f json
 ```
 
-`status` distinguishes a running app from a loaded chat list (`chat_list_present`) and reports when a native file picker is open. `chats` reads the visible chat list, including each row's `selected` state. `read` reads messages currently loaded in the app, rather than the entire history. `open` and `read --phone` select a chat in the desktop app. `search` returns chat and contact matches from the desktop search panel; it checks that the query reached the search field and did not alter the chat draft.
+`status` distinguishes a running app from a loaded chat list (`chat_list_present`) and reports when a native file picker is open. `chats` reads the visible chat list, including each row's `selected` state. `read` reads messages currently loaded in the app, rather than the entire history. `open` and `read --phone` select a chat in the desktop app. `search` returns chat and contact matches from the desktop search panel; it checks that the query reached the search field and did not alter the chat draft. `reset` quits and relaunches the app to clear a stuck search. It refuses when the open chat has an unsent draft, and it verifies that the chat list is loaded and the search field is empty, then checks again 5 seconds later.
 
 ## Send
 

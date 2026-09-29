@@ -9,10 +9,6 @@ function toCleanString(value) {
     return typeof value === 'string' ? value.trim() : value == null ? '' : String(value).trim();
 }
 
-function isObject(value) {
-    return value && typeof value === 'object' && !Array.isArray(value);
-}
-
 export function parseCollectionLimit(raw) {
     const parsed = Number(raw ?? 20);
     if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
@@ -22,40 +18,6 @@ export function parseCollectionLimit(raw) {
         throw new ArgumentError(`--limit must be between 1 and 100, got ${parsed}`);
     }
     return parsed;
-}
-
-export function mapCollectionNote(entry) {
-    if (!isObject(entry))
-        return null;
-    const noteCard = entry.note_card ?? entry.noteCard ?? entry;
-    const noteId = toCleanString(entry.note_id
-        ?? entry.noteId
-        ?? entry.id
-        ?? noteCard.note_id
-        ?? noteCard.noteId
-        ?? noteCard.id);
-    if (!noteId)
-        return null;
-    const user = noteCard.user ?? entry.user ?? {};
-    const userId = toCleanString(user.user_id ?? user.userId ?? '');
-    const xsecToken = toCleanString(entry.xsec_token
-        ?? entry.xsecToken
-        ?? noteCard.xsec_token
-        ?? noteCard.xsecToken);
-    if (!xsecToken)
-        return null;
-    const interact = noteCard.interact_info ?? noteCard.interactInfo ?? entry.interact_info ?? entry.interactInfo ?? {};
-    const url = userId
-        ? buildXhsNoteUrl(userId, noteId, xsecToken)
-        : `https://www.xiaohongshu.com/explore/${encodeURIComponent(noteId)}?xsec_token=${encodeURIComponent(xsecToken)}&xsec_source=pc_user`;
-    return {
-        id: noteId,
-        title: toCleanString(noteCard.display_title ?? noteCard.displayTitle ?? noteCard.title ?? entry.title ?? entry.display_title),
-        author: toCleanString(user.nickname ?? user.nickName ?? user.nick_name ?? user.name),
-        likes: toCleanString(interact.liked_count ?? interact.likedCount ?? 0) || '0',
-        type: toCleanString(noteCard.type ?? entry.type),
-        url,
-    };
 }
 
 export async function resolveXhsUserId(page, rawId) {
@@ -69,5 +31,21 @@ export async function fetchXhsCollectionNotes(page, { userId, profileTab, limit,
     const path = profileTab === SAVED_PROFILE_TAB ? '/api/sns/web/v2/note/collect/page' : '/api/sns/web/v1/note/like/page';
     const notes = await readNoteListApi(page, path, userId, limit);
     if (!notes.length) throw new EmptyResultError('xiaohongshu collection', `No ${emptyLabel} notes found.`);
-    return notes.map((note, index) => ({ rank: index + 1, ...mapCollectionNote(note) }));
+    // readNoteListApi already rejected notes without noteId, xsecToken, user or interactInfo,
+    // and the site client returns camelCase, so the fields are read directly.
+    return notes.map((note, index) => {
+        const authorId = toCleanString(note.user.userId);
+        return {
+            rank: index + 1,
+            id: note.noteId,
+            title: toCleanString(note.displayTitle ?? note.title),
+            author: toCleanString(note.user.nickname ?? note.user.nickName),
+            likes: toCleanString(note.interactInfo.likedCount ?? 0) || '0',
+            type: toCleanString(note.type),
+            // load-bearing: buildXhsNoteUrl returns '' without an author id; fall back to a signed /explore link.
+            url: authorId
+                ? buildXhsNoteUrl(authorId, note.noteId, note.xsecToken)
+                : `https://www.xiaohongshu.com/explore/${encodeURIComponent(note.noteId)}?xsec_token=${encodeURIComponent(note.xsecToken)}&xsec_source=pc_user`,
+        };
+    });
 }

@@ -56,6 +56,9 @@ function pageForApi({ wrongFinalFlight = false, pendingReturn = false } = {}) {
                                 specialProductDesc: '仅限留学生购买' },
                             { totalAdultPrice: 446700, adultPrice: 244000, adultTax: 202700,
                                 cabinInfo: [[{ cabinClass: 'Y' }], [{ cabinClass: 'Y' }]] },
+                            // Cheapest total, but null + tax === total; must not be quoted as fare 0.
+                            { totalAdultPrice: 202700, adultPrice: null, adultTax: 202700,
+                                cabinInfo: [[{ cabinClass: 'Y' }], [{ cabinClass: 'Y' }]] },
                         ] };
                 return { ok: true, text: async () => `jsonpOpencli(${JSON.stringify({ status: 200, success: 1, data })})` };
             },

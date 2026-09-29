@@ -2349,7 +2349,7 @@ async function handleWaitDownload(cmd) {
     return errorResult(cmd.id, err);
   }
 }
-async function releaseLease(leaseKey, reason = "released") {
+async function releaseLease(leaseKey, reason) {
   return withLeaseMutation(() => releaseLeaseUnlocked(leaseKey, reason));
 }
 async function releaseLeaseUnlocked(leaseKey, reason) {

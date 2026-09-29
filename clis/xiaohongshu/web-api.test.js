@@ -187,6 +187,22 @@ describe('Xiaohongshu main-site commands', () => {
         expect(await command(name).func(page, { 'user-id': userId })).toMatchObject([{ status }]);
         expect(client.post).not.toHaveBeenCalled();
     });
+    it.each([
+        `https://www.xiaohongshu.com/user/profile/${userId}`,
+        `https://www.xiaohongshu.com/user/profile/${userId}/?xsec_token=t&xsec_source=pc`,
+    ])('extracts the user id from profile URL %s for follow and unfollow', async (input) => {
+        client.get.mockResolvedValue({ extraInfo: { fstatus: 'both', blockType: 'DEFAULT' } });
+        expect(await command('follow').func(page, { 'user-id': input })).toMatchObject([{ status: 'already-following', user_id: userId }]);
+        expect(client.get).toHaveBeenLastCalledWith('/api/sns/web/v1/user/otherinfo', expect.objectContaining({ params: { targetUserId: userId } }));
+        client.get.mockResolvedValue({ extraInfo: { fstatus: 'none', blockType: 'DEFAULT' } });
+        expect(await command('unfollow').func(page, { 'user-id': input })).toMatchObject([{ status: 'not-following', user_id: userId }]);
+    });
+    it.each(['', 'short', '!!!', `https://evil.example/user/profile/${userId}`, `http://www.xiaohongshu.com/user/profile/${userId}`, `https://www.xiaohongshu.com/user/profile/${userId}/note123`])('rejects user id %j before any request', async (input) => {
+        await expect(command('follow').func(page, { 'user-id': input })).rejects.toMatchObject({ code: 'ARGUMENT' });
+        await expect(command('unfollow').func(page, { 'user-id': input })).rejects.toMatchObject({ code: 'ARGUMENT' });
+        expect(page.evaluate).not.toHaveBeenCalled();
+        expect(page.evaluateOnce).not.toHaveBeenCalled();
+    });
     it('does not retry a write with uncertain verification', async () => {
         client.get.mockResolvedValueOnce({ extraInfo: { fstatus: 'none', blockType: 'DEFAULT' } }).mockRejectedValueOnce({ status: 500 });
         client.post.mockResolvedValue({});

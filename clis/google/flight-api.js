@@ -74,9 +74,10 @@ export async function fetchFlightResults(request, cookies, method, payload) {
 }
 
 export async function readBookingResults(page, expectedJourneys) {
-    const request = await waitForApiRequest(page, (entry) =>
-        new URL(entry.url).origin === 'https://www.google.com' &&
-        new URL(entry.url).pathname === FLIGHT_API_PATH + 'GetBookingResults' && entry.method === 'POST', 'Google Flights booking API request');
+    const request = await waitForApiRequest(page, (entry) => {
+        const url = new URL(entry.url);
+        return url.origin === 'https://www.google.com' && url.pathname === FLIGHT_API_PATH + 'GetBookingResults' && entry.method === 'POST';
+    }, 'Google Flights booking API request');
     let criteria;
     let context;
     try {
@@ -85,7 +86,7 @@ export async function readBookingResults(page, expectedJourneys) {
     } catch { throw new CommandExecutionError('Google Flights booking API request was malformed'); }
     const journeys = criteria?.[13];
     if (context?.[2] !== 'SGD' || !Array.isArray(journeys) || journeys.length !== expectedJourneys.length ||
-        journeys.some((journey, index) => journey[6] !== expectedJourneys[index][0][1] ||
+        journeys.some((journey, index) => journey?.[6] !== expectedJourneys[index][0][1] ||
             JSON.stringify(journey[8]) !== JSON.stringify(expectedJourneys[index]))) {
         throw new CommandExecutionError('Google Flights booking API request did not match the selected itinerary and currency');
     }

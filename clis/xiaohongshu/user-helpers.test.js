@@ -42,10 +42,10 @@ describe('extractXhsUserNotes', () => {
                     },
                     {
                         noteCard: {
-                            note_id: 'note-2',
-                            display_title: 'Second note',
+                            noteId: 'note-2',
+                            displayTitle: 'Second note',
                             type: 'normal',
-                            interact_info: { liked_count: 42 },
+                            interactInfo: { likedCount: 42 },
                         },
                     },
                 ],

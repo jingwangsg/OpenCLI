@@ -239,6 +239,27 @@ describe('rednote Pinia store failures', () => {
         });
     });
 
+    it('builds signed rednote note URLs from the hydrated feed store and truncates to --limit', async () => {
+        const command = getRegistry().get('rednote/feed');
+        const entry = (id) => ({ id, title: `title-${id}`, type: 'normal', author: 'author', likes: '100', xsecToken: `tok-${id}` });
+        const page = createPageMock({ items: [entry('a'), entry('b'), entry('c')] });
+        const rows = await command.func(page, { limit: 2 });
+        expect(page.goto).toHaveBeenCalledWith('https://www.rednote.com/explore');
+        expect(rows).toEqual([
+            { id: 'a', title: 'title-a', type: 'normal', author: 'author', likes: '100', url: 'https://www.rednote.com/explore/a?xsec_token=tok-a&xsec_source=' },
+            { id: 'b', title: 'title-b', type: 'normal', author: 'author', likes: '100', url: 'https://www.rednote.com/explore/b?xsec_token=tok-b&xsec_source=' },
+        ]);
+    });
+
+    it('fails typed instead of emitting an unsigned URL when a feed entry lacks xsecToken', async () => {
+        const command = getRegistry().get('rednote/feed');
+        const page = createPageMock({ items: [{ id: 'a', title: 't', xsecToken: '' }] });
+        await expect(command.func(page, { limit: 20 })).rejects.toMatchObject({
+            code: 'COMMAND_EXEC',
+            message: expect.stringContaining('xsecToken'),
+        });
+    });
+
     it('maps notification action failure to CommandExecutionError', async () => {
         const command = getRegistry().get('rednote/notifications');
         const page = createPageMock({ error: 'action_failed', detail: 'blocked' });

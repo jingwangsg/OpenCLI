@@ -2120,7 +2120,7 @@ async function handleWaitDownload(cmd: Command): Promise<Result> {
   }
 }
 
-async function releaseLease(leaseKey: string, reason: string = 'released'): Promise<void> {
+async function releaseLease(leaseKey: string, reason: string): Promise<void> {
   return withLeaseMutation(() => releaseLeaseUnlocked(leaseKey, reason));
 }
 

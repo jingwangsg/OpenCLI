@@ -22,6 +22,8 @@ cli({
 });
 
 cli({
+    // load-bearing: 'read', not the shared login's 'write'. This never navigates or mutates; it only polls identity
+    // GETs, and 'write' with siteSession 'persistent' would hold the session lease for the whole --timeout wait.
     site: 'xiaohongshu', name: 'login', access: 'read', description: 'Wait for main-site login in the already bound Xiaohongshu tab',
     domain: 'www.xiaohongshu.com', strategy: Strategy.COOKIE, browser: true, navigateBefore: false, siteSession: 'persistent',
     args: [{ name: 'timeout', type: 'int', default: 300, help: 'Maximum seconds to wait for manual login in the bound tab' }],

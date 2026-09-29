@@ -12,7 +12,10 @@ function runNative(operation, args = []) {
   try {
     const output = execFileSync('swift', [nativeScript, operation, ...args.map(String)], {
       encoding: 'utf8',
-      timeout: operation === 'file' ? 120_000 : operation === 'delete-chats' ? 60_000 : 30_000,
+      // swift recompiles native.swift on every call (~2s idle, up to ~15s under load); each tier is that
+      // plus the operation's worst-case AX poll budget (file ~40s, delete-chats ~15s + 1s per target,
+      // everything else <= ~21s for image) plus margin, so a slow compile cannot time out a delivered send.
+      timeout: operation === 'file' ? 120_000 : operation === 'delete-chats' ? 90_000 : 60_000,
     });
     return JSON.parse(output);
   } catch (error) {

@@ -43,8 +43,8 @@ opencli booking search Tokyo --checkin 2026-06-15 --checkout 2026-06-17 -f json
 | `review_score` | float \| null | Aggregate guest score on a 1.0–10.0 scale (e.g. `8.6`) |
 | `review_count` | int \| null | Number of reviews backing the score |
 | `price_amount` | float \| null | Displayed whole-stay price from the API, rounded to cents; it remains a listing quote |
-| `price_currency` | string | ISO 4217 currency code from the API. Pass `--currency USD` (or similar) to request and verify one currency |
-| `distance` | string \| null | Distance-from-centre string (locale-formatted, e.g. `3.4 km from centre` / `离中心地区3.4千米`) |
+| `price_currency` | string | ISO 4217 currency code from the API; empty when there is no price. Pass `--currency USD` (or similar) to request and verify one currency |
+| `distance` | string | Distance-from-centre string (locale-formatted, e.g. `3.4 km from centre` / `离中心地区3.4千米`); empty when Booking does not supply one |
 | `recommended_room` | string | Name of the recommended room configuration, when available |
 | `url` | string | Canonical `https://www.booking.com/hotel/<country>/<slug>.html` |
 

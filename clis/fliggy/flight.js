@@ -119,6 +119,7 @@ cli({
                 const fares = quoted.productItems.filter((item) =>
                     !item.specialProductDesc && !item.productFlagDesc &&
                     item.cabinInfo?.length === 2 && item.cabinInfo.flat().every((cabin) => cabin.cabinClass === 'Y') &&
+                    Number.isInteger(item.adultPrice) && Number.isInteger(item.adultTax) &&
                     Number.isInteger(item.totalAdultPrice) && item.totalAdultPrice > 0 &&
                     item.adultPrice + item.adultTax === item.totalAdultPrice);
                 if (!fares.length) throw new Error('no-economy-fare');

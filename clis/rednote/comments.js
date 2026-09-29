@@ -1,10 +1,10 @@
 /**
  * Rednote comments — international mirror of xiaohongshu/comments.
- * Reuses the DOM-extraction IIFE from `../xiaohongshu/comments.js`.
+ * Reuses the DOM-extraction IIFE from `../xiaohongshu/comment-helpers.js`.
  */
 import { cli, Strategy } from '@jackwener/opencli/registry';
 import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
-import { buildCommentsExtractJs, normalizeCommentRows } from '../xiaohongshu/comments.js';
+import { buildCommentsExtractJs, normalizeCommentRows } from '../xiaohongshu/comment-helpers.js';
 import { buildNoteUrl, parseNoteId } from '../xiaohongshu/note-helpers.js';
 
 const REDNOTE_SIGNED_URL_HINT = 'Pass a full rednote.com note URL with xsec_token from search results or user/profile context.';

@@ -46,28 +46,30 @@ export function buildXhsNoteUrl(userId, noteId, xsecToken, webHost = 'www.xiaoho
     return url.toString();
 }
 /**
- * Normalise a Pinia user-store snapshot into CLI rows. `webHost` is forwarded
- * to `buildXhsNoteUrl` so the resulting URLs point at the calling site.
+ * Normalise note entries into CLI rows. Both callers hand over camelCase:
+ * user.js passes web-API notes (the site client converts response case) and
+ * rednote/user.js passes the hydrated Pinia store snapshot. `webHost` is
+ * forwarded to `buildXhsNoteUrl` so the resulting URLs point at the calling site.
  */
 export function extractXhsUserNotes(snapshot, fallbackUserId, webHost = 'www.xiaohongshu.com') {
     const notes = flattenXhsNoteGroups(snapshot.noteGroups);
     const rows = [];
     const seen = new Set();
     for (const entry of notes) {
-        const noteCard = entry?.noteCard ?? entry?.note_card ?? entry;
+        const noteCard = entry?.noteCard ?? entry;
         if (!noteCard || typeof noteCard !== 'object')
             continue;
-        const noteId = toCleanString(noteCard.noteId ?? noteCard.note_id ?? entry?.noteId ?? entry?.note_id ?? entry?.id);
+        const noteId = toCleanString(noteCard.noteId ?? entry?.id);
         if (!noteId || seen.has(noteId))
             continue;
         seen.add(noteId);
-        const userId = toCleanString(noteCard.user?.userId ?? noteCard.user?.user_id ?? fallbackUserId);
-        const xsecToken = toCleanString(entry?.xsecToken ?? entry?.xsec_token ?? noteCard.xsecToken ?? noteCard.xsec_token);
-        const likes = toCleanString(noteCard.interactInfo?.likedCount ?? noteCard.interact_info?.liked_count ?? 0) || '0';
+        const userId = toCleanString(noteCard.user?.userId ?? fallbackUserId);
+        const xsecToken = toCleanString(entry?.xsecToken ?? noteCard.xsecToken);
+        const likes = toCleanString(noteCard.interactInfo?.likedCount ?? 0) || '0';
         const cover = toCleanString(noteCard.cover?.urlDefault ?? noteCard.cover?.urlPre ?? noteCard.cover?.url ?? '');
         rows.push({
             id: noteId,
-            title: toCleanString(noteCard.displayTitle ?? noteCard.display_title ?? noteCard.title),
+            title: toCleanString(noteCard.displayTitle ?? noteCard.title),
             type: toCleanString(noteCard.type),
             likes,
             cover,

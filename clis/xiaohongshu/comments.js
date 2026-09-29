@@ -9,8 +9,6 @@ import { CommandExecutionError } from '@jackwener/opencli/errors';
 import { parseNoteId, buildNoteUrl } from './note-helpers.js';
 import { parseCommentLimit, parseXhsLikeCountText, normalizeCommentImages } from './comment-helpers.js';
 import { callWebApi } from './web-api.js';
-// load-bearing: rednote/comments.js imports the DOM extractor through this module path.
-export { buildCommentsExtractJs, normalizeCommentRows } from './comment-helpers.js';
 
 export const command = cli({
     site: 'xiaohongshu',

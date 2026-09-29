@@ -189,6 +189,12 @@ export class Page extends CDPBasePage {
     return Array.isArray(result) ? result : [];
   }
 
+  async evaluateOnce<T = unknown>(js: string): Promise<T>;
+  async evaluateOnce<Args extends unknown[], T>(fn: BrowserEvaluateFunction<Args, T>, ...args: Args): Promise<Awaited<T>>;
+  async evaluateOnce(input: string | BrowserEvaluateFunction<unknown[], unknown>, ...args: unknown[]): Promise<unknown> {
+    return sendCommand('exec', { code: buildEvaluateExpression(input, args), ...this._cmdOpts() });
+  }
+
   /** Release the current browser session lease in the extension */
   async closeWindow(): Promise<void> {
     try {

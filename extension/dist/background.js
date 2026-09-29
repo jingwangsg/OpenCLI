@@ -1499,7 +1499,7 @@ async function findReusableOwnedContainerTab(windowId, ownedGroupId) {
 function initialTabIsAvailable(tabId) {
   if (tabId === void 0) return false;
   for (const session of automationSessions.values()) {
-    if (session.owned && session.preferredTabId === tabId) return false;
+    if (session.preferredTabId === tabId) return false;
   }
   return true;
 }
@@ -2350,6 +2350,9 @@ async function handleWaitDownload(cmd) {
   }
 }
 async function releaseLease(leaseKey, reason = "released") {
+  return withLeaseMutation(() => releaseLeaseUnlocked(leaseKey, reason));
+}
+async function releaseLeaseUnlocked(leaseKey, reason) {
   const session = automationSessions.get(leaseKey);
   if (!session) {
     sessionOverrides.delete(leaseKey);
@@ -2359,7 +2362,12 @@ async function releaseLease(leaseKey, reason = "released") {
   }
   if (session.idleTimer) clearTimeout(session.idleTimer);
   scheduleIdleAlarm(leaseKey, IDLE_TIMEOUT_NONE);
-  if (session.owned) {
+  const sharedTab = session.preferredTabId !== null && [...automationSessions.entries()].some(
+    ([otherKey, other]) => otherKey !== leaseKey && other.preferredTabId === session.preferredTabId
+  );
+  if (sharedTab) {
+    console.log(`[opencli] Retained tab ${session.preferredTabId} for another lease (${reason})`);
+  } else if (session.owned) {
     const tabId = session.preferredTabId;
     if (tabId !== null) {
       const hasOtherOwnedLease = [...automationSessions.entries()].some(
@@ -2410,6 +2418,7 @@ async function reconcileTargetLeaseRegistry() {
     }
   }
   automationSessions.clear();
+  const idleLeases = [];
   for (const [leaseKey, stored] of Object.entries(registry.leases)) {
     const tabId = stored.preferredTabId;
     if (tabId === null) continue;
@@ -2443,15 +2452,13 @@ async function reconcileTargetLeaseRegistry() {
         }
       }
       const remaining = stored.idleDeadlineAt > 0 ? stored.idleDeadlineAt - Date.now() : timeout;
-      if (timeout > 0) {
-        if (remaining <= 0) {
-          await releaseLease(leaseKey, "reconciled idle expiry");
-        } else {
-          resetWindowIdleTimer(leaseKey, remaining);
-        }
-      }
+      if (timeout > 0) idleLeases.push([leaseKey, remaining]);
     } catch {
     }
+  }
+  for (const [leaseKey, remaining] of idleLeases) {
+    if (remaining <= 0) await releaseLease(leaseKey, "reconciled idle expiry");
+    else resetWindowIdleTimer(leaseKey, remaining);
   }
   try {
     await ensureOwnedContainerGroup("interactive", null, []);
@@ -2461,10 +2468,10 @@ async function reconcileTargetLeaseRegistry() {
   await persistRuntimeState();
 }
 async function handleBind(cmd, leaseKey) {
+  return withLeaseMutation(() => bindLease(cmd, leaseKey));
+}
+async function bindLease(cmd, leaseKey) {
   const existing = automationSessions.get(leaseKey);
-  if (existing?.owned) {
-    await releaseLease(leaseKey, "rebind");
-  }
   const activeTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   const fallbackTabs = await chrome.tabs.query({ lastFocusedWindow: true });
   const boundTab = activeTabs.find((tab) => isDebuggableUrl(tab.url)) ?? fallbackTabs.find((tab) => isDebuggableUrl(tab.url));
@@ -2477,6 +2484,7 @@ async function handleBind(cmd, leaseKey) {
       errorHint: "Focus the target Chrome tab/window, then retry bind."
     };
   }
+  if (existing?.owned && existing.preferredTabId !== boundTab.id) await releaseLeaseUnlocked(leaseKey, "rebind");
   const current = automationSessions.get(leaseKey);
   if (current && !current.owned && current.preferredTabId !== null && current.preferredTabId !== boundTab.id) {
     await detach(current.preferredTabId).catch(() => {

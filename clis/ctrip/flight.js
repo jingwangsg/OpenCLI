@@ -1,9 +1,9 @@
 /**
  * 携程机票 oneway search — domestic + international flight search by route + date.
  *
- * Flight rows arrive in the page's natural `batchSearch` response. Capture that
- * response through CDP so Ctrip remains responsible for request parameters,
- * trace ids, risk controls, and session state; do not reconstruct its request.
+ * Read the state backing the results list after the page reports completion.
+ * It contains flights omitted by virtualized cards and by collapsed codeshares.
+ * Project only flight/fare fields: the full state also contains booking tokens.
  *
  * Round-trip search lives in the sibling `flight-round` command; advanced filters
  * (airline whitelist, cabin selection beyond 全舱位) remain out of scope here.
@@ -15,23 +15,48 @@ import { parseIataCode, parseIsoDate, parseStrictIntegerRange } from './utils.js
 const MIN_LIMIT = 1;
 const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 20;
-const CAPTURE_PATTERN = '/international/search/api/search/batchSearch';
-const CAPTURE_TIMEOUT_SECONDS = 12;
-const WAIT_FOR_BATCH_CAPTURE_JS = `
+const SEARCH_TIMEOUT_SECONDS = 30;
+const READ_FLIGHTS_JS = `
   new Promise((resolve) => {
-    const detect = () => {
-      if (location.pathname.includes('captcha') || /验证码|verify the human|安全验证/i.test(document.body?.innerText || '')) return 'captcha';
-      if (document.querySelector('.flight-item')) return 'content';
+    const read = () => {
+      if (/captcha|passport/.test(location.pathname) ||
+          /验证码|verify the human|安全验证/i.test(document.body?.innerText || '')) return 'captcha';
+      const list = document.querySelector('.flight-list');
+      if (!list) return null;
+      let fiber = list[Object.keys(list).find((key) => key.startsWith('__reactFiber$'))];
+      while (fiber) {
+        const props = fiber.memoizedProps;
+        if (props?.flightList && typeof props.searchIsFinish === 'boolean') {
+          if (!props.searchIsFinish) return null;
+          if (typeof props.flightList.toJS !== 'function') return 'malformed';
+          const flights = props.flightList.toJS();
+          if (!Array.isArray(flights)) return 'malformed';
+          if (flights.some((flight) => !Array.isArray(flight.flightSegments) || !Array.isArray(flight.priceList) ||
+              flight.flightSegments.some((segment) => !Array.isArray(segment.flightList)))) return 'malformed';
+          return flights.map((flight) => ({
+            itineraryId: flight.itineraryId,
+            flightSegments: flight.flightSegments.map((segment) => ({
+              airlineName: segment.airlineName,
+              transferCount: segment.transferCount,
+              flightList: segment.flightList.map((leg) => Object.fromEntries([
+                'flightNo', 'aircraftName', 'departureDateTime', 'departureAirportName',
+                'arrivalDateTime', 'arrivalAirportName', 'arrivalTerminal',
+              ].map((field) => [field, leg[field]]))),
+            })),
+            priceList: flight.priceList.slice(0, 1).map((fare) => ({ sortPrice: fare.totalPriceWithTax, cabin: fare.cabin })),
+          }));
+        }
+        fiber = fiber.return;
+      }
       return null;
     };
-    const found = detect();
-    if (found) return resolve(found);
-    const observer = new MutationObserver(() => {
-      const result = detect();
-      if (result) { observer.disconnect(); resolve(result); }
-    });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-    setTimeout(() => { observer.disconnect(); resolve('timeout'); }, ${CAPTURE_TIMEOUT_SECONDS * 1000});
+    const initial = read();
+    if (initial !== null) return resolve(initial);
+    const timer = setInterval(() => {
+      const result = read();
+      if (result !== null) { clearInterval(timer); clearTimeout(deadline); resolve(result); }
+    }, 200);
+    const deadline = setTimeout(() => { clearInterval(timer); resolve('timeout'); }, ${SEARCH_TIMEOUT_SECONDS * 1000});
   })
 `;
 
@@ -54,61 +79,11 @@ function cabinLabel(value) {
     return codes.length > 0 ? codes.map((code) => labels[code]).join('/') : (cleanString(value) || null);
 }
 
-function parseBatchSearchCaptures(entries) {
-    if (!Array.isArray(entries)) {
-        throw new CommandExecutionError('Ctrip flight network capture returned malformed entries');
-    }
-    const captured = entries.filter((entry) => String(entry?.url || '').includes(CAPTURE_PATTERN));
-    if (captured.length === 0) return null;
-
-    const byId = new Map();
-    let finished = false;
-    for (const entry of captured) {
-        const status = Number(entry?.responseStatus || 0);
-        if (status === 401 || status === 403) {
-            throw new AuthRequiredError('flights.ctrip.com', `Ctrip flight API returned HTTP ${status}; complete any verification in the browser and retry`);
-        }
-        if (status !== 200) {
-            throw new CommandExecutionError(`Ctrip flight API returned HTTP ${status || 'unknown'}`);
-        }
-        if (entry?.responseBodyTruncated === true) {
-            throw new CommandExecutionError('Ctrip flight API response exceeded the browser capture limit');
-        }
-        if (typeof entry?.responsePreview !== 'string') {
-            throw new CommandExecutionError('Ctrip flight API response body was unavailable');
-        }
-        let payload;
-        try {
-            payload = JSON.parse(entry.responsePreview);
-        }
-        catch {
-            throw new CommandExecutionError('Ctrip flight API returned invalid JSON');
-        }
-        if (payload?.status !== 0) {
-            throw new CommandExecutionError(`Ctrip flight API failed (status=${String(payload?.status)}): ${cleanString(payload?.msg) || 'unknown error'}`);
-        }
-        const itineraries = payload?.data?.flightItineraryList;
-        if (!Array.isArray(itineraries) || typeof payload?.data?.context?.finished !== 'boolean') {
-            throw new CommandExecutionError('Ctrip flight API returned a malformed batchSearch payload');
-        }
-        for (const itinerary of itineraries) {
-            const id = cleanString(itinerary?.itineraryId);
-            if (!id) throw new CommandExecutionError('Ctrip flight API returned an itinerary without an id');
-            byId.set(id, itinerary);
-        }
-        finished = payload.data.context.finished;
-    }
-    if (!finished) {
-        throw new CommandExecutionError('Ctrip flight batchSearch ended before the upstream search reported completion');
-    }
-    return [...byId.values()];
-}
-
 function mapItinerary(itinerary, searchUrl, index) {
     const segments = itinerary?.flightSegments;
     const prices = itinerary?.priceList;
-    if (!Array.isArray(segments) || segments.length === 0 || !Array.isArray(prices) || prices.length === 0) {
-        throw new CommandExecutionError(`Ctrip flight API returned malformed itinerary at index ${index}`);
+    if (!cleanString(itinerary?.itineraryId) || !Array.isArray(segments) || segments.length === 0 || !Array.isArray(prices) || prices.length === 0) {
+        throw new CommandExecutionError(`Ctrip flight results contained a malformed itinerary at index ${index}`);
     }
     const legs = segments.flatMap((segment) => Array.isArray(segment?.flightList) ? segment.flightList : []);
     const first = legs[0];
@@ -120,9 +95,9 @@ function mapItinerary(itinerary, searchUrl, index) {
     const arrivalTime = timePart(last?.arrivalDateTime);
     const departureAirport = cleanString(first?.departureAirportName);
     const arrivalAirport = cleanString(last?.arrivalAirportName);
-    const price = Number(prices[0]?.sortPrice ?? prices[0]?.adultPrice);
+    const price = prices[0]?.sortPrice;
     if (!airline || !flightNo || !departureTime || !arrivalTime || !departureAirport || !arrivalAirport || !Number.isFinite(price)) {
-        throw new CommandExecutionError(`Ctrip flight API returned malformed itinerary at index ${index}`);
+        throw new CommandExecutionError(`Ctrip flight results contained a malformed itinerary at index ${index}`);
     }
     const row = {
         airline,
@@ -148,7 +123,7 @@ cli({
     access: 'read',
     description: '搜索携程一程机票（按出发/到达 IATA 三字码 + 日期）',
     domain: 'flights.ctrip.com',
-    strategy: Strategy.INTERCEPT,
+    strategy: Strategy.COOKIE,
     browser: true,
     navigateBefore: false,
     args: [
@@ -177,23 +152,16 @@ cli({
         const searchUrl =
             `https://flights.ctrip.com/online/list/oneway-${fromCode.toLowerCase()}-${toCode.toLowerCase()}` +
             `?depdate=${date}&cabin=Y_S_C_F&adult=1&child=0&infant=0`;
-        if (typeof page?.startNetworkCapture !== 'function' ||
-            typeof page?.readNetworkCapture !== 'function' ||
-            !await page.startNetworkCapture(CAPTURE_PATTERN)) {
-            throw new CommandExecutionError('Ctrip flight requires browser response interception');
-        }
-        await page.readNetworkCapture();
         await page.goto(searchUrl);
-        // The initial document can finish before the large batchSearch body.
-        // The first rendered card is only a readiness signal; row data still
-        // comes exclusively from the structured response below.
-        const readiness = await page.evaluate(WAIT_FOR_BATCH_CAPTURE_JS);
-        if (readiness === 'captcha') {
-            throw new AuthRequiredError('flights.ctrip.com', 'Ctrip is asking for a captcha; complete it in your browser session and retry');
+        const itineraries = await page.evaluate(READ_FLIGHTS_JS);
+        if (itineraries === 'captcha') {
+            throw new AuthRequiredError('flights.ctrip.com', 'Complete the Ctrip verification in your browser and retry');
         }
-        const itineraries = parseBatchSearchCaptures(await page.readNetworkCapture());
-        if (!itineraries) {
-            throw new TimeoutError('Ctrip flight API capture', CAPTURE_TIMEOUT_SECONDS, 'No batchSearch response was observed after opening the results page.');
+        if (itineraries === 'timeout') {
+            throw new TimeoutError('Ctrip flight search', SEARCH_TIMEOUT_SECONDS, 'The results page did not report a completed search.');
+        }
+        if (!Array.isArray(itineraries)) {
+            throw new CommandExecutionError('Ctrip flight results state is malformed');
         }
         if (itineraries.length === 0) {
             throw new EmptyResultError('ctrip flight', `No flights for ${fromCode}→${toCode} on ${date}`);

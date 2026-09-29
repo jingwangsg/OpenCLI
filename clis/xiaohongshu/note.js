@@ -7,9 +7,7 @@
  * Requires a full Xiaohongshu note URL with xsec_token.
  */
 import { cli, Strategy } from '@jackwener/opencli/registry';
-import { AuthRequiredError, EmptyResultError } from '@jackwener/opencli/errors';
-import { parseNoteId, buildNoteUrl } from './note-helpers.js';
-import { readXhsDetailPage } from './risk-control.js';
+import { readNoteApi } from './web-api.js';
 /**
  * Host-agnostic IIFE that scrapes note title / author / counts / tags from a
  * rendered note detail page. Exported so the rednote adapter can reuse the
@@ -69,54 +67,22 @@ export const command = cli({
     description: '获取小红书笔记正文和互动数据',
     domain: 'www.xiaohongshu.com',
     strategy: Strategy.COOKIE,
-    navigateBefore: false,
+    navigateBefore: false, siteSession: 'persistent',
     args: [
         { name: 'note-id', required: true, positional: true, help: 'Full Xiaohongshu note URL with xsec_token' },
     ],
     columns: ['field', 'value'],
     func: async (page, kwargs) => {
-        const raw = String(kwargs['note-id']);
-        const noteId = parseNoteId(raw);
-        const url = buildNoteUrl(raw, { commandName: 'xiaohongshu note' });
-        // readXhsDetailPage paces the navigation and retries once through a
-        // cooldown if risk control soft-blocks the page (throws SECURITY_BLOCK
-        // when still blocked after the retry).
-        const data = await readXhsDetailPage(page, {
-            url,
-            extractJs: NOTE_EXTRACT_JS,
-            securityHelp: /^https?:\/\//.test(raw)
-                ? 'The page may be temporarily restricted. Try again later or from a different session.'
-                : 'Try using a full URL from search results (with xsec_token) instead of a bare note ID.',
-        });
-        if (!data || typeof data !== 'object') {
-            throw new EmptyResultError('xiaohongshu/note', 'Unexpected evaluate response');
-        }
-        if (data.loginWall) {
-            throw new AuthRequiredError('www.xiaohongshu.com', 'Note content requires login');
-        }
-        if (data.notFound) {
-            throw new EmptyResultError('xiaohongshu/note', `Note ${noteId} not found or unavailable — it may have been deleted or restricted`);
-        }
-        const d = data;
-        // XHS renders placeholder text like "赞"/"收藏"/"评论" when count is 0;
-        // normalize to '0' unless the value looks numeric.
-        const numOrZero = (v) => /^\d+/.test(v) ? v : '0';
-        // A note may legitimately have no title, but a real note page always
-        // renders an author. If both are missing, the page failed to load.
-        if (!d.title && !d.author) {
-            throw new EmptyResultError('xiaohongshu/note', 'The note page loaded without visible content. The note may be deleted or restricted.');
-        }
+        const note = await readNoteApi(page, String(kwargs['note-id']));
         const rows = [
-            { field: 'title', value: d.title || '' },
-            { field: 'author', value: d.author || '' },
-            { field: 'content', value: d.desc || '' },
-            { field: 'likes', value: numOrZero(d.likes || '') },
-            { field: 'collects', value: numOrZero(d.collects || '') },
-            { field: 'comments', value: numOrZero(d.comments || '') },
+            { field: 'title', value: note.title || '' },
+            { field: 'author', value: note.user.nickname || note.user.nickName || '' },
+            { field: 'content', value: note.desc },
+            { field: 'likes', value: String(note.interactInfo.likedCount ?? 0) },
+            { field: 'collects', value: String(note.interactInfo.collectedCount ?? 0) },
+            { field: 'comments', value: String(note.interactInfo.commentCount ?? 0) },
         ];
-        if (d.tags?.length) {
-            rows.push({ field: 'tags', value: d.tags.join(', ') });
-        }
+        if (note.tagList?.length) rows.push({ field: 'tags', value: note.tagList.map((tag) => tag.name).join(', ') });
         return rows;
     },
 });

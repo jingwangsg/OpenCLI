@@ -56,7 +56,9 @@ const FORBIDDEN_PATTERNS = [
   /(?:from|mock|importActual)\s*\(?['"](?:\.\.\/)+pipeline\//,
 ];
 
-describe('adapter imports use package exports', () => {
+// load-bearing: these tests scan ~2000 adapter files; the 5s default trips when the full suite
+// runs in parallel and workers are CPU-starved (seen as a baseline timeout; the whole file passes alone in ~1s).
+describe('adapter imports use package exports', { timeout: 30_000 }, () => {
   const adapterFiles = collectAdapterFiles(CLIS_DIR);
   const runtimeAdapterFiles = collectAdapterFiles(CLIS_DIR, { excludeTests: true });
 

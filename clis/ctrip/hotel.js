@@ -1,18 +1,7 @@
-/**
- * 携程酒店详情: single-hotel profile by id (rating sub-scores, hot facilities,
- * check-in/out policy, address, and coordinates).
- *
- * Reads `window.__NEXT_DATA__.props.pageProps.hotelDetailResponse` from the SSR
- * detail page, the same source style as `hotel-search`. This surfaces the fields
- * the list row does not carry (the four rating sub-scores, hot facilities, the
- * check-in/out policy). Room-level nightly prices load via a post-SSR XHR into
- * hashed CSS-module cards, so they are out of scope here the same way `flight`'s
- * post-load price XHR is; `hotel-search` already surfaces a representative
- * nightly price per hotel.
- */
-import { AuthRequiredError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
+/** Hotel metadata from the site's first-party aggregate API. */
+import { readTripHotelDetail } from '../_shared/trip-hotel-detail-api.js';
 import { cli, Strategy } from '@jackwener/opencli/registry';
-import { WAIT_FOR_HOTEL_DETAIL_JS, buildHotelDetailExtractJs, buildHotelDetailUrl, parseHotelId } from './utils.js';
+import { buildHotelDetailUrl, parseHotelId } from './utils.js';
 
 cli({
     site: 'ctrip',
@@ -36,21 +25,7 @@ cli({
     func: async (page, kwargs) => {
         const hotelId = parseHotelId(kwargs.id);
         const url = buildHotelDetailUrl(hotelId);
-        await page.goto(url);
-        const waitResult = await page.evaluate(WAIT_FOR_HOTEL_DETAIL_JS);
-        if (waitResult === 'captcha') {
-            throw new AuthRequiredError('hotels.ctrip.com', 'Ctrip is asking for a captcha; complete it in your browser session and retry');
-        }
-        if (waitResult !== 'content') {
-            throw new CommandExecutionError(`Ctrip hotel detail page did not expose SSR hotel data (state=${String(waitResult)})`);
-        }
-        const detail = await page.evaluate(buildHotelDetailExtractJs());
-        if (!detail || typeof detail !== 'object') {
-            throw new CommandExecutionError('Ctrip hotel detail SSR extraction returned malformed data');
-        }
-        if (!detail.hotelId || !detail.name) {
-            throw new EmptyResultError('ctrip hotel', `No detail exposed for hotel id ${hotelId}`);
-        }
+        const detail = await readTripHotelDetail(page, 'ctrip', hotelId);
         return [{ ...detail, url }];
     },
 });

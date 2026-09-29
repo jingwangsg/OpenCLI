@@ -1332,6 +1332,79 @@
     "navigateBefore": false
   },
   {
+    "site": "agoda",
+    "name": "search",
+    "description": "Search Agoda hotel offers through its GraphQL API by city, dates, and adults",
+    "access": "read",
+    "domain": "agoda.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "destination",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "City name or Agoda city ID (e.g. Osaka / 9590)"
+      },
+      {
+        "name": "checkin",
+        "type": "str",
+        "required": true,
+        "help": "Check-in date (YYYY-MM-DD)"
+      },
+      {
+        "name": "checkout",
+        "type": "str",
+        "required": true,
+        "help": "Check-out date (YYYY-MM-DD)"
+      },
+      {
+        "name": "adults",
+        "type": "str",
+        "default": 2,
+        "required": false,
+        "help": "Adults in one room (1-16)"
+      },
+      {
+        "name": "currency",
+        "type": "str",
+        "default": "SGD",
+        "required": false,
+        "help": "Currency code (e.g. SGD / USD / CNY)"
+      },
+      {
+        "name": "limit",
+        "type": "str",
+        "default": 10,
+        "required": false,
+        "help": "Number of hotels (1-50)"
+      }
+    ],
+    "columns": [
+      "rank",
+      "id",
+      "name",
+      "area",
+      "stars",
+      "rating",
+      "reviews",
+      "price",
+      "priceUnit",
+      "totalPrice",
+      "currency",
+      "taxesIncluded",
+      "nights",
+      "checkin",
+      "checkout",
+      "url"
+    ],
+    "type": "js",
+    "modulePath": "agoda/search.js",
+    "sourceFile": "agoda/search.js",
+    "navigateBefore": false
+  },
+  {
     "site": "aibase",
     "name": "news",
     "description": "AIbase 日报 - 每天三分钟关注AI行业趋势",
@@ -1356,6 +1429,76 @@
     "type": "js",
     "modulePath": "aibase/news.js",
     "sourceFile": "aibase/news.js"
+  },
+  {
+    "site": "airbnb",
+    "name": "search",
+    "description": "Search Airbnb stays through its StaysSearch API by destination, dates, and adults",
+    "access": "read",
+    "domain": "airbnb.com.sg",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "destination",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "City or destination (e.g. Osaka / Tokyo)"
+      },
+      {
+        "name": "checkin",
+        "type": "str",
+        "required": true,
+        "help": "Check-in date (YYYY-MM-DD)"
+      },
+      {
+        "name": "checkout",
+        "type": "str",
+        "required": true,
+        "help": "Check-out date (YYYY-MM-DD)"
+      },
+      {
+        "name": "adults",
+        "type": "str",
+        "default": 2,
+        "required": false,
+        "help": "Adults (1-16)"
+      },
+      {
+        "name": "currency",
+        "type": "str",
+        "default": "SGD",
+        "required": false,
+        "help": "Currency code (e.g. SGD / USD / CNY)"
+      },
+      {
+        "name": "limit",
+        "type": "str",
+        "default": 10,
+        "required": false,
+        "help": "Number of stays (1-50)"
+      }
+    ],
+    "columns": [
+      "rank",
+      "id",
+      "name",
+      "description",
+      "rating",
+      "reviews",
+      "price",
+      "priceUnit",
+      "currency",
+      "nights",
+      "checkin",
+      "checkout",
+      "url"
+    ],
+    "type": "js",
+    "modulePath": "airbnb/search.js",
+    "sourceFile": "airbnb/search.js",
+    "navigateBefore": false
   },
   {
     "site": "amazon",
@@ -5261,11 +5404,11 @@
   {
     "site": "booking",
     "name": "search",
-    "description": "Search Booking.com hotels by destination and dates (server-rendered card scrape).",
+    "description": "Search Booking.com hotel stay prices through its FullSearch API.",
     "access": "read",
     "example": "opencli booking search Tokyo --checkin 2026-06-15 --checkout 2026-06-17 -f yaml",
     "domain": "www.booking.com",
-    "strategy": "public",
+    "strategy": "cookie",
     "browser": true,
     "args": [
       {
@@ -5351,7 +5494,8 @@
     ],
     "type": "js",
     "modulePath": "booking/search.js",
-    "sourceFile": "booking/search.js"
+    "sourceFile": "booking/search.js",
+    "navigateBefore": "https://www.booking.com"
   },
   {
     "site": "boss",
@@ -9108,7 +9252,7 @@
     "description": "搜索携程一程机票（按出发/到达 IATA 三字码 + 日期）",
     "access": "read",
     "domain": "flights.ctrip.com",
-    "strategy": "intercept",
+    "strategy": "cookie",
     "browser": true,
     "args": [
       {
@@ -9264,7 +9408,7 @@
   {
     "site": "ctrip",
     "name": "hotel-search",
-    "description": "搜索携程酒店列表（按城市 + 入住/离店日期）",
+    "description": "通过酒店 API 搜索携程酒店（按城市和日期，1间1成人）",
     "access": "read",
     "domain": "hotels.ctrip.com",
     "strategy": "cookie",
@@ -9294,7 +9438,7 @@
         "type": "str",
         "default": 10,
         "required": false,
-        "help": "Number of hotels (1-30); SSR first page returns ~13 entries"
+        "help": "Number of hotels (1-30)"
       }
     ],
     "columns": [
@@ -14519,6 +14663,74 @@
     "sourceFile": "flathub/search.js"
   },
   {
+    "site": "fliggy",
+    "name": "flight",
+    "description": "查询飞猪国际往返指定航班的含税报价（使用已登录浏览器的机票 API）",
+    "access": "read",
+    "domain": "sijipiao.fliggy.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "from",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "出发城市 IATA 代码，如 SIN"
+      },
+      {
+        "name": "to",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "目的地城市 IATA 代码，如 OSA / TYO"
+      },
+      {
+        "name": "depart",
+        "type": "str",
+        "required": true,
+        "help": "去程日期 YYYY-MM-DD"
+      },
+      {
+        "name": "return",
+        "type": "str",
+        "required": true,
+        "help": "返程日期 YYYY-MM-DD"
+      },
+      {
+        "name": "outbound",
+        "type": "str",
+        "required": true,
+        "help": "按顺序列出全部去程航班号，如 CX636,CX566"
+      },
+      {
+        "name": "inbound",
+        "type": "str",
+        "required": true,
+        "help": "按顺序列出全部返程航班号，如 CX567,CX635"
+      }
+    ],
+    "columns": [
+      "outbound",
+      "inbound",
+      "depart",
+      "return",
+      "outboundLayoversMinutes",
+      "inboundLayoversMinutes",
+      "cabin",
+      "price",
+      "fare",
+      "tax",
+      "priceIncludesTax",
+      "currency",
+      "url"
+    ],
+    "type": "js",
+    "modulePath": "fliggy/flight.js",
+    "sourceFile": "fliggy/flight.js",
+    "navigateBefore": false
+  },
+  {
     "site": "flomo",
     "name": "login",
     "description": "Open flomo login and wait until the browser session is authenticated",
@@ -16113,6 +16325,93 @@
   },
   {
     "site": "google",
+    "name": "flight-offers",
+    "description": "Read provider quotes from a selected Google Flights itinerary through its booking API",
+    "access": "read",
+    "domain": "google.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "url",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Google Flights booking URL with a tfs itinerary token and curr=SGD"
+      }
+    ],
+    "columns": [
+      "rank",
+      "provider",
+      "price",
+      "currency",
+      "flightNo",
+      "separateTickets",
+      "url"
+    ],
+    "type": "js",
+    "modulePath": "google/flight-offers.js",
+    "sourceFile": "google/flight-offers.js",
+    "navigateBefore": false
+  },
+  {
+    "site": "google",
+    "name": "flights",
+    "description": "Compare Google Flights nonstop round trips for one adult in economy through its APIs",
+    "access": "read",
+    "domain": "google.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "from",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Departure airport IATA code (e.g. SIN)"
+      },
+      {
+        "name": "to",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Arrival airport IATA code (e.g. SYD / WSI)"
+      },
+      {
+        "name": "depart",
+        "type": "str",
+        "required": true,
+        "help": "Outbound date (YYYY-MM-DD)"
+      },
+      {
+        "name": "return",
+        "type": "str",
+        "required": true,
+        "help": "Return date (YYYY-MM-DD)"
+      }
+    ],
+    "columns": [
+      "rank",
+      "provider",
+      "price",
+      "currency",
+      "flightNo",
+      "outboundAirline",
+      "outboundDeparture",
+      "outboundArrival",
+      "returnAirline",
+      "returnDeparture",
+      "returnArrival",
+      "separateTickets",
+      "url"
+    ],
+    "type": "js",
+    "modulePath": "google/flights.js",
+    "sourceFile": "google/flights.js",
+    "navigateBefore": false
+  },
+  {
+    "site": "google",
     "name": "images",
     "description": "Search Google Images for photos and image results",
     "access": "read",
@@ -16313,6 +16612,312 @@
     "type": "js",
     "modulePath": "google/trends.js",
     "sourceFile": "google/trends.js"
+  },
+  {
+    "site": "google-maps",
+    "name": "list",
+    "description": "Read all places and notes from a Google Maps saved list",
+    "access": "read",
+    "domain": "www.google.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "list",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Saved-list id or full Google Maps list URL"
+      },
+      {
+        "name": "account",
+        "type": "int",
+        "required": false,
+        "help": "Google account index; defaults to the URL authuser or 0"
+      }
+    ],
+    "columns": [
+      "rank",
+      "placeId",
+      "name",
+      "note",
+      "url"
+    ],
+    "type": "js",
+    "modulePath": "google-maps/list.js",
+    "sourceFile": "google-maps/list.js",
+    "navigateBefore": false
+  },
+  {
+    "site": "google-maps",
+    "name": "list-description",
+    "description": "Set a Google Maps list description",
+    "access": "write",
+    "domain": "www.google.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "list",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "List id or full Maps list URL"
+      },
+      {
+        "name": "text",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Exact new text; an empty string clears it"
+      },
+      {
+        "name": "account",
+        "type": "int",
+        "required": false,
+        "help": "Google account index; defaults to the URL authuser or 0"
+      },
+      {
+        "name": "execute",
+        "type": "bool",
+        "default": false,
+        "required": false,
+        "help": "Submit and verify the change; default previews it"
+      }
+    ],
+    "columns": [
+      "operation",
+      "status",
+      "listId",
+      "placeId",
+      "before",
+      "after"
+    ],
+    "type": "js",
+    "modulePath": "google-maps/mutations.js",
+    "sourceFile": "google-maps/mutations.js",
+    "navigateBefore": false
+  },
+  {
+    "site": "google-maps",
+    "name": "list-info",
+    "description": "Read Google Maps saved-list name, description, and item count",
+    "access": "read",
+    "domain": "www.google.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "list",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Saved-list id or full Google Maps list URL"
+      },
+      {
+        "name": "account",
+        "type": "int",
+        "required": false,
+        "help": "Google account index; defaults to the URL authuser or 0"
+      }
+    ],
+    "columns": [
+      "listId",
+      "name",
+      "description",
+      "count",
+      "url"
+    ],
+    "type": "js",
+    "modulePath": "google-maps/list.js",
+    "sourceFile": "google-maps/list.js",
+    "navigateBefore": false
+  },
+  {
+    "site": "google-maps",
+    "name": "note",
+    "description": "Set a saved place note",
+    "access": "write",
+    "domain": "www.google.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "list",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "List id or full Maps list URL"
+      },
+      {
+        "name": "place",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Place id or full Maps place URL"
+      },
+      {
+        "name": "text",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Exact new text; an empty string clears it"
+      },
+      {
+        "name": "account",
+        "type": "int",
+        "required": false,
+        "help": "Google account index; defaults to the URL authuser or 0"
+      },
+      {
+        "name": "execute",
+        "type": "bool",
+        "default": false,
+        "required": false,
+        "help": "Submit and verify the change; default previews it"
+      }
+    ],
+    "columns": [
+      "operation",
+      "status",
+      "listId",
+      "placeId",
+      "before",
+      "after"
+    ],
+    "type": "js",
+    "modulePath": "google-maps/mutations.js",
+    "sourceFile": "google-maps/mutations.js",
+    "navigateBefore": false
+  },
+  {
+    "site": "google-maps",
+    "name": "place",
+    "description": "Read Google Maps place details by stable place id or full Maps URL",
+    "access": "read",
+    "domain": "www.google.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "place",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "0x…:0x… id or a full Google Maps place URL"
+      }
+    ],
+    "columns": [
+      "rank",
+      "placeId",
+      "name",
+      "rating",
+      "reviews",
+      "address",
+      "phone",
+      "website",
+      "priceRange",
+      "hours",
+      "location",
+      "url"
+    ],
+    "type": "js",
+    "modulePath": "google-maps/place.js",
+    "sourceFile": "google-maps/place.js",
+    "navigateBefore": false
+  },
+  {
+    "site": "google-maps",
+    "name": "save",
+    "description": "Save a place to a Google Maps list",
+    "access": "write",
+    "domain": "www.google.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "list",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "List id or full Maps list URL"
+      },
+      {
+        "name": "place",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Place id or full Maps place URL"
+      },
+      {
+        "name": "account",
+        "type": "int",
+        "required": false,
+        "help": "Google account index; defaults to the URL authuser or 0"
+      },
+      {
+        "name": "execute",
+        "type": "bool",
+        "default": false,
+        "required": false,
+        "help": "Submit and verify the change; default previews it"
+      }
+    ],
+    "columns": [
+      "operation",
+      "status",
+      "listId",
+      "placeId",
+      "before",
+      "after"
+    ],
+    "type": "js",
+    "modulePath": "google-maps/mutations.js",
+    "sourceFile": "google-maps/mutations.js",
+    "navigateBefore": false
+  },
+  {
+    "site": "google-maps",
+    "name": "search",
+    "description": "Search Google Maps places through its JSON API",
+    "access": "read",
+    "domain": "www.google.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "query",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Place name or category with a location"
+      },
+      {
+        "name": "limit",
+        "type": "int",
+        "default": 20,
+        "required": false,
+        "help": "Number of places (1-100)"
+      }
+    ],
+    "columns": [
+      "rank",
+      "placeId",
+      "name",
+      "rating",
+      "reviews",
+      "address",
+      "phone",
+      "website",
+      "priceRange",
+      "hours",
+      "location",
+      "url"
+    ],
+    "type": "js",
+    "modulePath": "google-maps/search.js",
+    "sourceFile": "google-maps/search.js",
+    "navigateBefore": false
   },
   {
     "site": "google-scholar",
@@ -39953,12 +40558,17 @@
     "columns": [
       "rank",
       "airline",
+      "flightNo",
       "departureTime",
       "departureAirport",
       "arrivalTime",
       "arrivalAirport",
+      "departureDateTime",
+      "arrivalDateTime",
       "duration",
       "stops",
+      "connections",
+      "layoversMinutes",
       "price",
       "currency",
       "url"
@@ -40014,12 +40624,17 @@
     "columns": [
       "rank",
       "airline",
+      "flightNo",
       "departureTime",
       "departureAirport",
       "arrivalTime",
       "arrivalAirport",
+      "departureDateTime",
+      "arrivalDateTime",
       "duration",
       "stops",
+      "connections",
+      "layoversMinutes",
       "price",
       "currency",
       "url"
@@ -40071,7 +40686,7 @@
   {
     "site": "trip",
     "name": "hotel-search",
-    "description": "List Trip.com hotels for a city id + check-in/out date range",
+    "description": "List Trip.com hotel API offers for one room and two adults by city id + dates",
     "access": "read",
     "domain": "trip.com",
     "strategy": "cookie",
@@ -40082,7 +40697,7 @@
         "type": "str",
         "required": true,
         "positional": true,
-        "help": "Numeric Trip.com city id (discover via the hotels search box; e.g. 338 for London)"
+        "help": "Numeric Trip.com city id (e.g. 219 for Osaka)"
       },
       {
         "name": "checkin",
@@ -40106,6 +40721,7 @@
     ],
     "columns": [
       "rank",
+      "hotelId",
       "name",
       "score",
       "reviewLabel",
@@ -40113,6 +40729,8 @@
       "location",
       "room",
       "price",
+      "totalPrice",
+      "totalPriceLabel",
       "currency",
       "url"
     ],
@@ -44538,6 +45156,747 @@
     "sourceFile": "weread-official/shelf.js"
   },
   {
+    "site": "whatsapp",
+    "name": "chats",
+    "description": "List visible WhatsApp chats, latest summaries, and selection state",
+    "access": "read",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "limit",
+        "type": "str",
+        "default": 20,
+        "required": false,
+        "help": "Maximum number of visible chats"
+      }
+    ],
+    "columns": [
+      "chat",
+      "phone",
+      "summary",
+      "selected"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "clear-chat",
+    "description": "Clear all messages from the exact current chat through Accessibility while keeping the chat",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "chat",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Exact current chat name returned by status"
+      }
+    ],
+    "columns": [
+      "chat",
+      "cleared"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "clear-draft",
+    "description": "Clear the composer only when the open chat name matches exactly",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "chat",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Exact current chat name returned by status"
+      }
+    ],
+    "columns": [
+      "chat",
+      "cleared"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "click",
+    "description": "Activate a labeled WhatsApp desktop control through Accessibility without moving the pointer",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "label",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Exact accessibility description shown by inspect or tree"
+      },
+      {
+        "name": "nth",
+        "type": "str",
+        "required": false,
+        "help": "Zero-based match index when the label is not unique"
+      }
+    ],
+    "columns": [
+      "clicked",
+      "nth"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "delete-chats",
+    "description": "Preview exact phone-number chat deletion; delete only with --execute after verifying a kept chat",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "phones",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Comma-separated target phone numbers with country codes, digits only"
+      },
+      {
+        "name": "keep",
+        "type": "str",
+        "required": true,
+        "help": "Phone number of a visible chat that must remain"
+      },
+      {
+        "name": "execute",
+        "type": "boolean",
+        "default": false,
+        "required": false,
+        "help": "Perform the deletion after exact selection checks"
+      }
+    ],
+    "columns": [
+      "phone",
+      "chat",
+      "kept_phone",
+      "kept_chat",
+      "action"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "delete-message",
+    "description": "Delete one exact message from the current chat for me, or for everyone when offered",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "chat",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Exact current chat name returned by status"
+      },
+      {
+        "name": "description",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Exact message description returned by read"
+      },
+      {
+        "name": "everyone",
+        "type": "boolean",
+        "default": false,
+        "required": false,
+        "help": "Choose Delete for everyone instead of Delete for me"
+      }
+    ],
+    "columns": [
+      "chat",
+      "scope",
+      "deleted",
+      "description"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "draft",
+    "description": "Fill an unsent text draft in an exact phone-number chat",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "phone",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Recipient phone number with country code, digits only"
+      },
+      {
+        "name": "text",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Text to leave in the composer without sending"
+      }
+    ],
+    "columns": [
+      "phone",
+      "chat",
+      "drafted",
+      "text"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "draft-chat",
+    "description": "Leave unsent text in one visible chat selected by exact name",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "chat",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Exact name of a visible chat"
+      },
+      {
+        "name": "text",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Text to leave in the composer without sending"
+      }
+    ],
+    "columns": [
+      "chat",
+      "drafted",
+      "text"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "draft-current",
+    "description": "Leave unsent text in the currently open chat after checking its exact name",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "chat",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Exact current chat name returned by status"
+      },
+      {
+        "name": "text",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Text to leave in the composer without sending"
+      }
+    ],
+    "columns": [
+      "chat",
+      "drafted",
+      "text"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "inspect",
+    "description": "List accessible controls in the current WhatsApp desktop window",
+    "access": "read",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "limit",
+        "type": "str",
+        "default": 80,
+        "required": false,
+        "help": "Maximum number of controls"
+      }
+    ],
+    "columns": [
+      "index",
+      "role",
+      "description",
+      "title",
+      "value"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "key",
+    "description": "Send a supported key or shortcut to WhatsApp desktop",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "key",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "return, escape, tab, backspace, arrows, cmd+f, cmd+n, or cmd+shift+g"
+      }
+    ],
+    "columns": [
+      "key"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "open",
+    "description": "Open a WhatsApp desktop chat by phone number",
+    "access": "read",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "phone",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Phone number with country code, digits only"
+      }
+    ],
+    "columns": [
+      "phone",
+      "chat"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "press",
+    "description": "Press a uniquely labeled WhatsApp desktop control",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "label",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Exact accessibility description shown by inspect or tree"
+      },
+      {
+        "name": "nth",
+        "type": "str",
+        "required": false,
+        "help": "Zero-based match index when the label is not unique"
+      }
+    ],
+    "columns": [
+      "pressed",
+      "nth"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "read",
+    "description": "Read recent visible messages from the current chat or a phone-number chat",
+    "access": "read",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "phone",
+        "type": "str",
+        "required": false,
+        "help": "Phone number with country code; omit for current chat"
+      },
+      {
+        "name": "limit",
+        "type": "str",
+        "default": 30,
+        "required": false,
+        "help": "Maximum number of visible messages"
+      }
+    ],
+    "columns": [
+      "chat",
+      "description"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "search",
+    "description": "Search WhatsApp desktop chats and contacts without changing the open chat draft",
+    "access": "read",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "query",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Chat or contact text to search for"
+      },
+      {
+        "name": "limit",
+        "type": "str",
+        "default": 30,
+        "required": false,
+        "help": "Maximum number of visible results"
+      }
+    ],
+    "columns": [
+      "description",
+      "value"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "send",
+    "description": "Send text to an exact phone-number chat and verify the sent message",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "phone",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Recipient phone number with country code, digits only"
+      },
+      {
+        "name": "text",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Message text to send"
+      }
+    ],
+    "columns": [
+      "phone",
+      "chat",
+      "sent",
+      "text"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "send-chat",
+    "description": "Send text to one visible chat by exact name in a single command",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "chat",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Exact name of a visible chat"
+      },
+      {
+        "name": "text",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Message text to send"
+      }
+    ],
+    "columns": [
+      "chat",
+      "sent",
+      "text"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "send-current",
+    "description": "Send text to the currently open chat, including groups, after checking its exact name",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "chat",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Exact current chat name returned by status"
+      },
+      {
+        "name": "text",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Message text to send"
+      }
+    ],
+    "columns": [
+      "chat",
+      "sent",
+      "text"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "send-file",
+    "description": "Send a local document through the native file picker and verify it in the chat",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "phone",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Recipient phone number with country code, digits only"
+      },
+      {
+        "name": "path",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Absolute path to a local file"
+      }
+    ],
+    "columns": [
+      "phone",
+      "chat",
+      "sent",
+      "path"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "send-image",
+    "description": "Send a local image to an exact phone-number chat and verify the sent photo",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "phone",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Recipient phone number with country code, digits only"
+      },
+      {
+        "name": "path",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Absolute path to a local image"
+      }
+    ],
+    "columns": [
+      "phone",
+      "chat",
+      "sent",
+      "path"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "set",
+    "description": "Set and verify a uniquely labeled WhatsApp desktop text control",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "label",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Exact text-control description shown by inspect"
+      },
+      {
+        "name": "value",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "New text value"
+      },
+      {
+        "name": "nth",
+        "type": "str",
+        "required": false,
+        "help": "Zero-based match index when the label is not unique"
+      }
+    ],
+    "columns": [
+      "control",
+      "value"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "set-focused",
+    "description": "Paste and verify text in the currently focused desktop text input",
+    "access": "write",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "value",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "New text for the focused input"
+      }
+    ],
+    "columns": [
+      "role",
+      "value"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "status",
+    "description": "Show app, chat-list, and file-picker state without changing the desktop UI",
+    "access": "read",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [],
+    "columns": [
+      "running",
+      "window",
+      "chat",
+      "chat_list_present",
+      "file_picker_open"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
+    "site": "whatsapp",
+    "name": "tree",
+    "description": "Inspect labeled accessibility elements and available actions in WhatsApp desktop",
+    "access": "read",
+    "domain": "localhost",
+    "strategy": "local",
+    "browser": false,
+    "args": [
+      {
+        "name": "limit",
+        "type": "str",
+        "default": 150,
+        "required": false,
+        "help": "Maximum number of labeled elements"
+      }
+    ],
+    "columns": [
+      "index",
+      "role",
+      "description",
+      "title",
+      "value",
+      "actions"
+    ],
+    "type": "js",
+    "modulePath": "whatsapp/commands.js",
+    "sourceFile": "whatsapp/commands.js"
+  },
+  {
     "site": "wikidata",
     "name": "entity",
     "description": "Fetch a Wikidata entity by Q/P/L id (label, description, aliases, claim summary)",
@@ -45535,7 +46894,8 @@
     "type": "js",
     "modulePath": "xiaohongshu/ask.js",
     "sourceFile": "xiaohongshu/ask.js",
-    "navigateBefore": false
+    "navigateBefore": false,
+    "siteSession": "persistent"
   },
   {
     "site": "xiaohongshu",
@@ -45583,7 +46943,8 @@
     "type": "js",
     "modulePath": "xiaohongshu/comments.js",
     "sourceFile": "xiaohongshu/comments.js",
-    "navigateBefore": false
+    "navigateBefore": false,
+    "siteSession": "persistent"
   },
   {
     "site": "xiaohongshu",
@@ -45806,7 +47167,8 @@
     "type": "js",
     "modulePath": "xiaohongshu/download.js",
     "sourceFile": "xiaohongshu/download.js",
-    "navigateBefore": false
+    "navigateBefore": false,
+    "siteSession": "persistent"
   },
   {
     "site": "xiaohongshu",
@@ -45981,12 +47343,13 @@
     "type": "js",
     "modulePath": "xiaohongshu/feed.js",
     "sourceFile": "xiaohongshu/feed.js",
-    "navigateBefore": false
+    "navigateBefore": false,
+    "siteSession": "persistent"
   },
   {
     "site": "xiaohongshu",
     "name": "follow",
-    "description": "关注小红书用户 (profile UI automation)",
+    "description": "关注小红书用户 (signed API)",
     "access": "write",
     "domain": "www.xiaohongshu.com",
     "strategy": "cookie",
@@ -45997,7 +47360,7 @@
         "type": "str",
         "required": true,
         "positional": true,
-        "help": "User ID (e.g. 5d8f88dc0000000001005d3a) or profile URL"
+        "help": "User id or profile URL"
       }
     ],
     "columns": [
@@ -46008,7 +47371,8 @@
     "type": "js",
     "modulePath": "xiaohongshu/follow.js",
     "sourceFile": "xiaohongshu/follow.js",
-    "navigateBefore": false
+    "navigateBefore": false,
+    "siteSession": "persistent"
   },
   {
     "site": "xiaohongshu",
@@ -46045,14 +47409,15 @@
     "type": "js",
     "modulePath": "xiaohongshu/liked.js",
     "sourceFile": "xiaohongshu/liked.js",
-    "navigateBefore": false
+    "navigateBefore": false,
+    "siteSession": "persistent"
   },
   {
     "site": "xiaohongshu",
     "name": "login",
-    "description": "Open xiaohongshu login and wait until the browser session is authenticated",
-    "access": "write",
-    "domain": "creator.xiaohongshu.com",
+    "description": "Wait for main-site login in the already bound Xiaohongshu tab",
+    "access": "read",
+    "domain": "www.xiaohongshu.com",
     "strategy": "cookie",
     "browser": true,
     "args": [
@@ -46061,7 +47426,7 @@
         "type": "int",
         "default": 300,
         "required": false,
-        "help": "Maximum seconds to wait for the user to finish login"
+        "help": "Maximum seconds to wait for manual login in the bound tab"
       }
     ],
     "columns": [
@@ -46075,8 +47440,7 @@
     "modulePath": "xiaohongshu/auth.js",
     "sourceFile": "xiaohongshu/auth.js",
     "navigateBefore": false,
-    "siteSession": "persistent",
-    "defaultWindowMode": "foreground"
+    "siteSession": "persistent"
   },
   {
     "site": "xiaohongshu",
@@ -46102,7 +47466,8 @@
     "type": "js",
     "modulePath": "xiaohongshu/note.js",
     "sourceFile": "xiaohongshu/note.js",
-    "navigateBefore": false
+    "navigateBefore": false,
+    "siteSession": "persistent"
   },
   {
     "site": "xiaohongshu",
@@ -46110,7 +47475,7 @@
     "description": "小红书通知 (mentions/likes/connections)",
     "access": "read",
     "domain": "www.xiaohongshu.com",
-    "strategy": "intercept",
+    "strategy": "cookie",
     "browser": true,
     "args": [
       {
@@ -46139,7 +47504,8 @@
     "type": "js",
     "modulePath": "xiaohongshu/notifications.js",
     "sourceFile": "xiaohongshu/notifications.js",
-    "navigateBefore": true
+    "navigateBefore": false,
+    "siteSession": "persistent"
   },
   {
     "site": "xiaohongshu",
@@ -46239,7 +47605,8 @@
     "type": "js",
     "modulePath": "xiaohongshu/saved.js",
     "sourceFile": "xiaohongshu/saved.js",
-    "navigateBefore": false
+    "navigateBefore": false,
+    "siteSession": "persistent"
   },
   {
     "site": "xiaohongshu",
@@ -46340,12 +47707,13 @@
     "type": "js",
     "modulePath": "xiaohongshu/search.js",
     "sourceFile": "xiaohongshu/search.js",
-    "navigateBefore": false
+    "navigateBefore": false,
+    "siteSession": "persistent"
   },
   {
     "site": "xiaohongshu",
     "name": "unfollow",
-    "description": "取消关注小红书用户 (profile UI automation)",
+    "description": "取消关注小红书用户 (signed API)",
     "access": "write",
     "domain": "www.xiaohongshu.com",
     "strategy": "cookie",
@@ -46356,7 +47724,7 @@
         "type": "str",
         "required": true,
         "positional": true,
-        "help": "User ID (e.g. 5d8f88dc0000000001005d3a) or profile URL"
+        "help": "User id or profile URL"
       }
     ],
     "columns": [
@@ -46367,7 +47735,8 @@
     "type": "js",
     "modulePath": "xiaohongshu/unfollow.js",
     "sourceFile": "xiaohongshu/unfollow.js",
-    "navigateBefore": false
+    "navigateBefore": false,
+    "siteSession": "persistent"
   },
   {
     "site": "xiaohongshu",
@@ -46403,14 +47772,15 @@
     "type": "js",
     "modulePath": "xiaohongshu/user.js",
     "sourceFile": "xiaohongshu/user.js",
-    "navigateBefore": false
+    "navigateBefore": false,
+    "siteSession": "persistent"
   },
   {
     "site": "xiaohongshu",
     "name": "whoami",
-    "description": "Show the current logged-in xiaohongshu account",
+    "description": "Show the signed-in Xiaohongshu main-site account",
     "access": "read",
-    "domain": "creator.xiaohongshu.com",
+    "domain": "www.xiaohongshu.com",
     "strategy": "cookie",
     "browser": true,
     "args": [],

@@ -1899,6 +1899,66 @@ describe('background tab isolation', () => {
     expect(mod.__test__.getSession(browserKey('default'))).not.toBeNull();
   });
 
+  it('does not blank or close a tab retained by a bound session when its owned lease expires', async () => {
+    const { chrome } = createChromeMock();
+    vi.useFakeTimers();
+    vi.stubGlobal('chrome', chrome);
+    const mod = await import('./background');
+    mod.__test__.setSession(adapterKey('owner'), { windowId: 2, owned: true, preferredTabId: 2 });
+    mod.__test__.setSession(browserKey('bound'), { windowId: 2, owned: false, preferredTabId: 2 });
+    mod.__test__.resetWindowIdleTimer(adapterKey('owner'));
+    await vi.advanceTimersByTimeAsync(30001);
+    expect(mod.__test__.getSession(adapterKey('owner'))).toBeNull();
+    expect(mod.__test__.getSession(browserKey('bound'))).not.toBeNull();
+    expect(chrome.tabs.update).not.toHaveBeenCalled();
+    expect(chrome.tabs.remove).not.toHaveBeenCalled();
+    expect(chrome.debugger.detach).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse a surviving bound tab for a new owned lease', async () => {
+    const { chrome, tabs, groups } = createChromeMock();
+    vi.stubGlobal('chrome', chrome);
+    tabs[1].groupId = 200;
+    groups.push({ id: 200, windowId: 2, title: 'OpenCLI Browser', color: 'orange', collapsed: false });
+    const mod = await import('./background');
+    mod.__test__.setSession(browserKey('old-owner'), { windowId: 2, owned: true, preferredTabId: 2 });
+    mod.__test__.setSession(browserKey('bound'), { windowId: 2, owned: false, preferredTabId: 2 });
+    await mod.__test__.handleCommand({ id: 'release-retained', action: 'close-window', session: 'old-owner', surface: 'browser' });
+    const result = await mod.__test__.handleCommand({ id: 'new-owner-navigation', action: 'navigate', session: 'new-owner', surface: 'browser', url: 'https://new.example' });
+    expect(result.ok).toBe(true);
+    expect(tabs.find((tab) => tab.id === 2)?.url).toBe('https://user.example');
+    expect(mod.__test__.getSession(browserKey('new-owner'))?.preferredTabId).not.toBe(2);
+  });
+
+  it('serializes binding behind an owned release already waiting for detach', async () => {
+    const { chrome } = createChromeMock();
+    vi.stubGlobal('chrome', chrome);
+    const detached = deferred<void>();
+    const entered = deferred<void>();
+    vi.doMock('./cdp', () => ({
+      registerListeners: vi.fn(), registerFrameTracking: vi.fn(),
+      hasActiveNetworkCapture: vi.fn(() => false),
+      detach: vi.fn(async () => { entered.resolve(); await detached.promise; }),
+    }));
+    const mod = await import('./background');
+    mod.__test__.setSession(adapterKey('owner'), { windowId: 2, owned: true, preferredTabId: 2 });
+    const release = mod.__test__.handleCommand({ id: 'release-shared', action: 'close-window', session: 'owner', surface: 'adapter' });
+    await entered.promise;
+    let bound = false;
+    const binding = mod.__test__.handleBind({ id: 'bind-during-release', action: 'bind', session: 'new-bound' }, browserKey('new-bound'))
+      .then((result) => { bound = true; return result; });
+    await Promise.resolve();
+    expect(bound).toBe(false);
+    detached.resolve();
+    await release;
+    const result = await binding;
+    expect(result.ok).toBe(true);
+    const updatesAfterBinding = chrome.tabs.update.mock.calls.length;
+    await Promise.resolve();
+    expect(chrome.tabs.update).toHaveBeenCalledTimes(updatesAfterBinding);
+    expect(mod.__test__.getSession(browserKey('new-bound'))).not.toBeNull();
+  });
+
   it('explicit close on a borrowed bound session detaches without touching tabs or windows', async () => {
     const { chrome } = createChromeMock();
     vi.stubGlobal('chrome', chrome);
@@ -2018,6 +2078,30 @@ describe('background tab isolation', () => {
   });
 
   const REGISTRY_KEY = 'opencli_target_lease_registry_v2';
+
+  it('restores bound references before expiring their older owned lease after worker recovery', async () => {
+    const { chrome, tabs } = createChromeMock();
+    vi.stubGlobal('chrome', chrome);
+    const originalUrl = tabs[0].url;
+    await chrome.storage.session.set({
+      [REGISTRY_KEY]: {
+        version: 2, contextId: 'user-default',
+        ownedContainers: { interactive: { windowId: null }, automation: { windowId: 1 } },
+        leases: {
+          [adapterKey('old-owner')]: { windowId: 1, owned: true, preferredTabId: 1, surface: 'adapter',
+            lifecycle: 'ephemeral', idleDeadlineAt: Date.now() - 1000 },
+          [browserKey('bound')]: { windowId: 1, owned: false, preferredTabId: 1, surface: 'browser',
+            kind: 'bound', lifecycle: 'pinned', idleDeadlineAt: 0 },
+        },
+      },
+    });
+    const mod = await import('./background');
+    await mod.__test__.reconcileTargetLeaseRegistry();
+    expect(mod.__test__.getSession(adapterKey('old-owner'))).toBeNull();
+    expect(mod.__test__.getSession(browserKey('bound'))).not.toBeNull();
+    expect(tabs[0].url).toBe(originalUrl);
+    expect(chrome.tabs.remove).not.toHaveBeenCalled();
+  });
 
   // Gate the registry read (in storage.session) so the startup recovery
   // chain (workerReady) stays pending on demand. Every other storage read

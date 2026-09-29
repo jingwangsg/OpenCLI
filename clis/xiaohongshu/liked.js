@@ -1,5 +1,5 @@
 import { cli, Strategy } from '@jackwener/opencli/registry';
-import { fetchXhsCollectionNotes, LIKE_API_PATTERN, LIKED_PROFILE_TAB, parseCollectionLimit, resolveXhsUserId } from './collection-helpers.js';
+import { fetchXhsCollectionNotes, LIKED_PROFILE_TAB, parseCollectionLimit, resolveXhsUserId } from './collection-helpers.js';
 
 cli({
     site: 'xiaohongshu',
@@ -8,7 +8,7 @@ cli({
     description: '小红书赞过笔记列表',
     domain: 'www.xiaohongshu.com',
     strategy: Strategy.COOKIE,
-    navigateBefore: false,
+    navigateBefore: false, siteSession: 'persistent',
     browser: true,
     args: [
         { name: 'id', type: 'string', help: 'User id or profile URL (defaults to current logged-in user)' },
@@ -21,7 +21,6 @@ cli({
         return fetchXhsCollectionNotes(page, {
             userId,
             profileTab: LIKED_PROFILE_TAB,
-            apiPattern: LIKE_API_PATTERN,
             limit,
             emptyLabel: 'liked',
         });

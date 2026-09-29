@@ -1,10 +1,8 @@
 /**
  * Shared helpers for the Trip.com (international) adapter.
  *
- * Trip.com is the English-facing sibling of Ctrip; its search pages render
- * results client-side, so the browser-mode commands read the rendered DOM.
- * Flight rows are `.result-item` cards keyed by stable `data-testid` anchors
- * (`flights-name`, `stopInfoText`, `flight_price_*`).
+ * Trip.com is the English-facing sibling of Ctrip. Flight commands replay the
+ * browser-signed flight API; other commands retain their own page data sources.
  */
 import { ArgumentError, CommandExecutionError } from '@jackwener/opencli/errors';
 
@@ -68,10 +66,10 @@ export function buildFlightSearchUrl(fromCode, toCode, date) {
         triptype: 'ow',
         class: 'y',
         quantity: '1',
-        locale: 'en_US',
+        locale: 'en-US',
         curr: 'USD',
     });
-    return `https://www.trip.com/flights/showfarefirst?${params.toString()}`;
+    return `https://us.trip.com/flights/showfarefirst?${params.toString()}`;
 }
 
 export function buildFlightRoundSearchUrl(fromCode, toCode, depart, ret) {
@@ -83,161 +81,11 @@ export function buildFlightRoundSearchUrl(fromCode, toCode, depart, ret) {
         triptype: 'rt',
         class: 'y',
         quantity: '1',
-        locale: 'en_US',
+        locale: 'en-US',
         curr: 'USD',
     });
-    return `https://www.trip.com/flights/showfarefirst?${params.toString()}`;
+    return `https://us.trip.com/flights/showfarefirst?${params.toString()}`;
 }
-
-/**
- * Browser-context IIFE that extracts flight rows from Trip.com's rendered
- * `.result-item` cards. Fields are read from stable `data-testid` anchors plus
- * the endpoint wrappers that bind one local-ISO time anchor to one airport.
- * Trip.com no longer emits the `font-black` class the previous selector keyed
- * on, but scanning every leaf in a card is too broad: an airline or price badge
- * can itself be three uppercase letters. Arrival times carry the signed day
- * suffix Trip.com renders (`+N` or `-N`) when the two local calendar dates
- * differ. Any ambiguous or malformed card makes the whole extraction non-array
- * so the host command fails typed instead of silently returning a wrong route
- * or a partial result set.
- */
-export function buildFlightExtractJs() {
-    return `
-      (() => {
-        const clean = (el) => el ? (el.textContent || '').replace(/\\s+/g, ' ').trim() : '';
-        const invalid = (cardIndex, field) => ({ error: 'malformed flight card ' + cardIndex + ': ' + field });
-        const isVisible = (el, boundary) => {
-          for (let node = el; node; node = node.parentElement) {
-            if (node.hidden || (node.getAttribute('aria-hidden') || '').toLowerCase() === 'true') return false;
-            const view = node.ownerDocument && node.ownerDocument.defaultView;
-            const style = view && typeof view.getComputedStyle === 'function' ? view.getComputedStyle(node) : null;
-            if (style && (style.display === 'none' || style.visibility === 'hidden')) return false;
-            if (node === boundary) break;
-          }
-          return true;
-        };
-        const visibleText = (root, boundary = root) => {
-          if (!isVisible(root, boundary)) return '';
-          const parts = [];
-          const visit = (node) => {
-            if (node.nodeType === 3) {
-              const value = (node.textContent || '').replace(/\\s+/g, ' ').trim();
-              if (value) parts.push(value);
-              return;
-            }
-            if (node.nodeType !== 1 || !isVisible(node, boundary)) return;
-            Array.from(node.childNodes).forEach(visit);
-          };
-          visit(root);
-          return parts.join(' ');
-        };
-        const visibleLeafTexts = (root, boundary = root) => {
-          const elements = root.children.length ? Array.from(root.querySelectorAll('*')) : [root];
-          return elements
-            .filter((el) => !el.children.length && isVisible(el, boundary))
-            .map((el) => clean(el))
-            .filter(Boolean);
-        };
-        const parseStamp = (anchor) => {
-          const raw = anchor && anchor.getAttribute('data-testid');
-          const match = /^flight-time-(\\d{4})-(\\d{2})-(\\d{2}) (\\d{2}):(\\d{2}):(\\d{2})$/.exec(raw || '');
-          if (!match) return null;
-          const year = Number(match[1]);
-          const month = Number(match[2]);
-          const day = Number(match[3]);
-          const hour = Number(match[4]);
-          const minute = Number(match[5]);
-          const second = Number(match[6]);
-          if (hour > 23 || minute > 59 || second > 59) return null;
-          const utc = Date.UTC(year, month - 1, day);
-          const check = new Date(utc);
-          if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return null;
-          return { dayNumber: Math.floor(utc / 86400000), hour, minute };
-        };
-        const parseEndpoint = (endpoint) => {
-          const anchors = Array.from(endpoint.querySelectorAll('[data-testid^="flight-time-"]'))
-            .filter((anchor) => isVisible(anchor, endpoint));
-          if (anchors.length !== 1) return null;
-          const stamp = parseStamp(anchors[0]);
-          if (!stamp) return null;
-          const display = visibleText(anchors[0], endpoint);
-          const timeMatch = /^(\\d{1,2}):(\\d{2})(?:\\s*(AM|PM))?$/.exec(display);
-          if (!timeMatch) return null;
-          let displayHour = Number(timeMatch[1]);
-          const displayMinute = Number(timeMatch[2]);
-          const meridiem = timeMatch[3] || null;
-          if (displayMinute > 59) return null;
-          if (meridiem) {
-            if (displayHour < 1 || displayHour > 12) return null;
-            displayHour = displayHour % 12 + (meridiem === 'PM' ? 12 : 0);
-          } else if (displayHour > 23) {
-            return null;
-          }
-          if (displayHour !== stamp.hour || displayMinute !== stamp.minute) return null;
-          const codes = visibleLeafTexts(endpoint)
-            .filter((text) => /^[A-Z]{3}$/.test(text));
-          if (codes.length !== 1) return null;
-          const normalizedTime = timeMatch[1] + ':' + timeMatch[2] + (meridiem ? ' ' + meridiem : '');
-          return { time: normalizedTime, airport: codes[0], dayNumber: stamp.dayNumber };
-        };
-        const rows = [];
-        const cards = Array.from(document.querySelectorAll('.result-item'));
-        for (let cardIndex = 0; cardIndex < cards.length; cardIndex += 1) {
-          const card = cards[cardIndex];
-          const airline = clean(card.querySelector('[data-testid="flights-name"]'));
-          if (!airline) return invalid(cardIndex, 'airline');
-          const routeWrappers = Array.from(card.querySelectorAll('[data-testid="flt-info-stop__wrapper"]'))
-            .filter((el) => isVisible(el, card));
-          if (routeWrappers.length !== 1) return invalid(cardIndex, 'route wrapper');
-          const endpointWrappers = Array.from(routeWrappers[0].querySelectorAll('[role="textbox"]'))
-            .filter((el) => isVisible(el, routeWrappers[0]))
-            .filter((el) => Array.from(el.querySelectorAll('[data-testid^="flight-time-"]'))
-              .some((anchor) => isVisible(anchor, el)));
-          if (endpointWrappers.length !== 2) return invalid(cardIndex, 'route endpoints');
-          const departure = parseEndpoint(endpointWrappers[0]);
-          const arrival = parseEndpoint(endpointWrappers[1]);
-          if (!departure || !arrival) return invalid(cardIndex, 'endpoint time/airport');
-          const dayOffset = arrival.dayNumber - departure.dayNumber;
-          const daySuffix = dayOffset > 0 ? '+' + dayOffset : (dayOffset < 0 ? String(dayOffset) : '');
-          const duration = clean(card.querySelector('[data-testid="flightInfoDuration"]')) || null;
-          const priceEl = card.querySelector('[data-testid^="flight_price"]');
-          const priceText = clean(priceEl);
-          const priceNum = priceText.replace(/[^0-9.]/g, '');
-          rows.push({
-            airline,
-            departureTime: departure.time,
-            departureAirport: departure.airport,
-            arrivalTime: arrival.time + daySuffix,
-            arrivalAirport: arrival.airport,
-            duration,
-            stops: clean(card.querySelector('[data-testid="stopInfoText"]')) || null,
-            price: priceNum ? Number(priceNum) : null,
-            currency: priceText.startsWith('$') ? 'USD' : (priceText.replace(/[0-9.,\\s]/g, '') || null),
-          });
-        }
-        return rows;
-      })()
-    `;
-}
-
-/** Wait for the flight list to render, or detect a captcha / verification wall. */
-export const WAIT_FOR_FLIGHTS_JS = `
-  new Promise((resolve) => {
-    const detect = () => {
-      if (/captcha|verify you are human|security check/i.test(document.body?.innerText || '')) return 'captcha';
-      if (document.querySelector('.result-item')) return 'content';
-      return null;
-    };
-    const found = detect();
-    if (found) return resolve(found);
-    const observer = new MutationObserver(() => {
-      const result = detect();
-      if (result) { observer.disconnect(); resolve(result); }
-    });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-    setTimeout(() => { observer.disconnect(); resolve('timeout'); }, 12000);
-  })
-`;
 
 export function parseCityId(name, raw) {
     if (raw === undefined || raw === null || String(raw).trim() === '') {
@@ -261,140 +109,21 @@ export function buildHotelSearchUrl(cityId, checkin, checkout) {
     return `https://www.trip.com/hotels/list?${params.toString()}`;
 }
 
-/**
- * Browser-context IIFE that extracts hotel rows from Trip.com's rendered
- * `.hotel-card` cards, read by stable class-keyed fields
- * (`.hotelName/.score/.comment-num/.position-desc/.price-highlight`). Cards
- * without a hotel name are dropped rather than surfaced with blanks.
- */
-export function buildHotelExtractJs() {
-    return `
-      (() => {
-        const clean = (el) => el ? (el.textContent || '').replace(/\\s+/g, ' ').trim() : '';
-        const toNum = (t) => { const m = String(t).replace(/[^0-9.]/g, ''); return m ? Number(m) : null; };
-        const rows = [];
-        document.querySelectorAll('.hotel-card').forEach((card) => {
-          const name = clean(card.querySelector('.hotelName'));
-          if (!name) return;
-          const locations = Array.from(card.querySelectorAll('.position-desc'))
-            .map((el) => clean(el)).filter(Boolean);
-          const priceText = clean(card.querySelector('.price-highlight'));
-          rows.push({
-            name,
-            score: toNum(clean(card.querySelector('.score'))),
-            reviewLabel: clean(card.querySelector('.comment-desc')) || null,
-            reviews: toNum(clean(card.querySelector('.comment-num'))),
-            location: locations.join(', ') || null,
-            room: clean(card.querySelector('.room-name')) || null,
-            price: toNum(priceText),
-            currency: priceText.startsWith('$') ? 'USD' : (priceText.replace(/[0-9.,\\s]/g, '') || null),
-          });
-        });
-        return rows;
-      })()
-    `;
-}
-
-/** Wait for the hotel list to render, or detect a verification wall. */
-export const WAIT_FOR_HOTELS_JS = `
-  new Promise((resolve) => {
-    const detect = () => {
-      if (/captcha|verify you are human|security check/i.test(document.body?.innerText || '')) return 'captcha';
-      if (document.querySelector('.hotel-card')) return 'content';
-      return null;
-    };
-    const found = detect();
-    if (found) return resolve(found);
-    const observer = new MutationObserver(() => {
-      const result = detect();
-      if (result) { observer.disconnect(); resolve(result); }
-    });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-    setTimeout(() => { observer.disconnect(); resolve('timeout'); }, 12000);
-  })
-`;
-
 export function parseHotelId(name, raw) {
     if (raw === undefined || raw === null || String(raw).trim() === '') {
         throw new ArgumentError(`--${name} is required (numeric Trip.com hotel id, discover via the hotels list)`);
     }
     const value = String(raw).trim();
-    if (!/^\d+$/.test(value)) {
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) {
         throw new ArgumentError(`--${name} must be a numeric Trip.com hotel id, got ${JSON.stringify(raw)}`);
     }
-    return value;
+    return String(Number(value));
 }
 
 export function buildHotelDetailUrl(hotelId) {
     const params = new URLSearchParams({ hotelId, locale: 'en_US', curr: 'USD' });
     return `https://www.trip.com/hotels/detail/?${params.toString()}`;
 }
-
-/**
- * Browser-context IIFE that projects the single-hotel profile from
- * `__NEXT_DATA__.props.pageProps.hotelDetailResponse` (the same SSR shape the
- * mainland `ctrip hotel` detail uses). Rating sub-scores, popular amenities, and
- * the check-in/out policy are each joined into one string so the profile stays a
- * single flat row. Returns `null` when the SSR block is absent, so the caller
- * raises a typed error instead of surfacing blanks. Room-level nightly prices
- * load via a post-SSR XHR and are out of scope here.
- */
-export function buildHotelDetailExtractJs() {
-    return `
-      (() => {
-        const pp = window.__NEXT_DATA__?.props?.pageProps;
-        const dr = pp && pp.hotelDetailResponse;
-        if (!dr || typeof dr !== 'object') return null;
-        const clean = (s) => (s == null ? null : String(s).replace(/\\s+/g, ' ').trim() || null);
-        const num = (s) => { const n = Number(s); return Number.isFinite(n) && n !== 0 ? n : null; };
-        const bi = dr.hotelBaseInfo || {};
-        const nameInfo = bi.nameInfo || {};
-        const starInfo = bi.starInfo || {};
-        const pos = dr.hotelPositionInfo || {};
-        const comment = (dr.hotelComment && dr.hotelComment.comment) || {};
-        const scoreDetail = Array.isArray(comment.scoreDetail) ? comment.scoreDetail : [];
-        const popList = (((dr.hotelFacilityPopV2 || {}).hotelPopularFacility || {}).list) || [];
-        const cio = (dr.hotelPolicyInfo && dr.hotelPolicyInfo.checkInAndOut) || {};
-        const cioContent = Array.isArray(cio.content) ? cio.content : [];
-        return {
-          hotelId: bi.masterHotelId != null ? String(bi.masterHotelId) : null,
-          name: clean(nameInfo.name),
-          enName: clean(nameInfo.nameEn),
-          star: (Number.isFinite(starInfo.level) && starInfo.level > 0) ? starInfo.level : null,
-          score: num(comment.score),
-          scoreLabel: clean(comment.scoreDescription),
-          reviewCount: (Number.isFinite(comment.totalComment) && comment.totalComment > 0) ? comment.totalComment : null,
-          ratingBreakdown: scoreDetail.map((s) => (s && s.showName && s.showScore) ? clean(s.showName) + ' ' + clean(s.showScore) : null).filter(Boolean).join(' / ') || null,
-          facilities: popList.map((f) => f && clean(f.facilityDesc)).filter(Boolean).join(' / ') || null,
-          checkInOut: cioContent.map((c) => c && clean((c.title || '') + (c.description || ''))).filter(Boolean).join(' / ') || null,
-          cityName: clean(bi.cityName),
-          address: clean(pos.address),
-          lat: num(pos.lat),
-          lon: num(pos.lng),
-        };
-      })()
-    `;
-}
-
-/** Wait for the hotel detail SSR block, or detect a verification wall. */
-export const WAIT_FOR_HOTEL_DETAIL_JS = `
-  new Promise((resolve) => {
-    const detect = () => {
-      if (/captcha|verify you are human|security check/i.test(document.body?.innerText || '')) return 'captcha';
-      const dr = window.__NEXT_DATA__?.props?.pageProps?.hotelDetailResponse;
-      if (dr && dr.hotelBaseInfo && dr.hotelBaseInfo.nameInfo) return 'content';
-      return null;
-    };
-    const found = detect();
-    if (found) return resolve(found);
-    const observer = new MutationObserver(() => {
-      const result = detect();
-      if (result) { observer.disconnect(); resolve(result); }
-    });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-    setTimeout(() => { observer.disconnect(); resolve('timeout'); }, 12000);
-  })
-`;
 
 export function parseKeyword(name, raw) {
     if (raw === undefined || raw === null || String(raw).trim() === '') {

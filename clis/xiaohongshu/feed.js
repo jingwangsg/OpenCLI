@@ -1,20 +1,16 @@
 /**
- * Xiaohongshu home feed — reads the hydrated Pinia `feed.feeds` array directly.
+ * Xiaohongshu home feed through the signed homefeed API (cursor pagination).
  *
- * Earlier versions used a `tap` step that called the `fetchFeeds` store action,
- * which fetches the NEXT page of recommendations. Those API items carry no
- * `xsecToken` and do not overlap the first-screen notes, so the feed's URLs
- * could not be passed to `note`/`comments`/`download` (which require a signed
- * URL). The hydrated store, by contrast, holds `entry.xsecToken` for every
- * first-screen note, so a func-mode read yields signed, drill-down-ready URLs.
- *
- * Mirrors rednote/feed.js: the hydrated store is camelCase on both sites
- * (`noteCard.displayTitle`, `interactInfo.likedCount`). This is the SSR store
- * shape, not the snake_case `/homefeed` API response the old tap intercepted.
+ * `runFeed` below reads the hydrated Pinia `feed.feeds` array instead. It is
+ * kept because rednote/feed.js still runs on it: the hydrated store is
+ * camelCase on both sites (`noteCard.displayTitle`, `interactInfo.likedCount`)
+ * and carries `entry.xsecToken` for every first-screen note, so its URLs are
+ * signed and drill-down-ready.
  */
 import { cli, Strategy } from '@jackwener/opencli/registry';
 import { ArgumentError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
 import { unwrapEvaluateResult } from './shared.js';
+import { callWebApi } from './web-api.js';
 
 function parseLimit(raw) {
     const parsed = Number(raw ?? 20);
@@ -148,10 +144,40 @@ export const command = cli({
     domain: 'www.xiaohongshu.com',
     strategy: Strategy.COOKIE,
     browser: true,
-    navigateBefore: false,
+    navigateBefore: false, siteSession: 'persistent',
     args: [
         { name: 'limit', type: 'int', default: 20, help: 'Number of items to return' },
     ],
     columns: ['id', 'title', 'author', 'likes', 'type', 'url'],
-    func: async (page, kwargs) => runFeed(page, kwargs, 'www.xiaohongshu.com'),
+    func: async (page, kwargs) => {
+        const limit = parseLimit(kwargs.limit);
+        const rows = [];
+        const seen = new Set();
+        const cursors = new Set(['']);
+        let cursor = '';
+        for (let number = 0; number < 100; number++) {
+            const data = await callWebApi(page, '/api/sns/web/v1/homefeed', { method: 'POST', body: {
+                cursorScore: cursor, num: 30, refreshType: number ? 3 : 1, noteIndex: rows.length,
+                unreadBeginNoteId: '', unreadEndNoteId: '', unreadNoteCount: 0, category: 'homefeed_recommend',
+                searchKey: '', needNum: 30, imageFormats: ['jpg', 'webp', 'avif'], needFilterImage: false,
+            } });
+            if (!Array.isArray(data.items)) throw new CommandExecutionError('Xiaohongshu feed omitted items');
+            if (!data.items.length) return rows;
+            const before = rows.length;
+            for (const item of data.items) {
+                if (item?.modelType !== 'note') continue;
+                const card = item.noteCard;
+                if (!item.id || !item.xsecToken || !card?.user || !card.interactInfo) throw new CommandExecutionError('Xiaohongshu feed returned an incomplete note');
+                if (seen.has(item.id)) continue;
+                seen.add(item.id);
+                rows.push({ id: item.id, title: card.displayTitle || '', author: card.user.nickname || card.user.nickName || '',
+                    likes: String(card.interactInfo.likedCount ?? 0), type: card.type || '', url: buildFeedNoteUrl('www.xiaohongshu.com', item.id, item.xsecToken) });
+                if (rows.length === limit) return rows;
+            }
+            if (rows.length === before || !data.cursorScore || cursors.has(data.cursorScore)) throw new CommandExecutionError('Xiaohongshu feed repeated or omitted its continuation cursor');
+            cursors.add(data.cursorScore);
+            cursor = data.cursorScore;
+        }
+        throw new CommandExecutionError('Xiaohongshu feed reached its page limit');
+    },
 });

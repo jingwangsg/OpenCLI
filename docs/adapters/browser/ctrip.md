@@ -14,8 +14,8 @@ and `flights.ctrip.com`.
 |---------|------|-------------|
 | `opencli ctrip search` | Public | Suggest cities, scenic spots, railway stations and landmarks |
 | `opencli ctrip hotel-suggest` | Public | Suggest cities, business areas and individual hotels |
-| `opencli ctrip hotel-search` | Browser (cookie) | List hotels for a city + check-in/out date range |
-| `opencli ctrip hotel` | Browser (cookie) | Single-hotel detail: rating breakdown, facilities, check-in/out policy |
+| `opencli ctrip hotel-search` | Cookie API | List hotels for a city + check-in/out date range |
+| `opencli ctrip hotel` | Cookie API | Single-hotel detail: rating breakdown, facilities, check-in/out policy |
 | `opencli ctrip flight` | Browser (cookie) | One-way flight search by IATA route + departure date |
 | `opencli ctrip flight-round` | Browser (cookie) | Round-trip flight search by IATA route + depart/return dates |
 | `opencli ctrip train` | Browser (cookie) | Train ticket search by station/city name + departure date |
@@ -43,7 +43,8 @@ opencli ctrip hotel 375539
 opencli ctrip hotel 375539 -f json
 
 # One-way flight search
-opencli ctrip flight BJS SHA --date 2026-05-20 --limit 20
+opencli ctrip flight BJS SHA --date 2026-10-15 --limit 20
+opencli ctrip flight SIN SHA --date 2026-10-15 --limit 10 -f json
 
 # Round-trip flight search (depart + return dates)
 opencli ctrip flight-round SHA BJS --depart 2026-08-15 --return 2026-08-22 --limit 20
@@ -112,17 +113,19 @@ Both suggest commands share a uniform column shape:
 Args:
 - `<city>` (positional, required) — numeric Ctrip city ID (discover via `ctrip search` / `ctrip hotel-suggest`).
 - `--checkin`, `--checkout` (required) — `YYYY-MM-DD`, validated as real calendar dates with `checkin < checkout`.
-- `--limit` (1-30, default 10) — Ctrip's SSR first page ships ~13 entries (10 organic + ~3 promoted). Larger limits are not currently supported because the server ignores the URL `pageSize` param.
+- `--limit` (1-30, default 10) — requests additional API pages until enough unique hotels are returned or the endpoint is exhausted.
+
+`hotel-search` sends city/date parameters directly to `m.ctrip.com/restapi/soa2/34951/fetchHotelList` with current profile cookies. It uses one room and one adult, with CNY prices. It does not load a results page or parse SSR data. Repeated pages, malformed hotel identities and pagination caps report errors rather than partial success.
 
 ## Flight Columns (`flight`)
 
 | Column | Notes |
 |--------|-------|
 | `rank` | 1-based position after filtering incomplete rows |
-| `airline`, `flightNo`, `aircraft` | Free-text from the rendered card; `flightNo` and `aircraft` may be `null` (the current `.flight-item` cards often omit the flight number) |
+| `airline`, `flightNo`, `aircraft` | Airline and flight numbers from the results state, including collapsed codeshares; aircraft may be `null` |
 | `departureTime`, `arrivalTime` | `HH:MM` strings |
 | `departureAirport`, `arrivalAirport`, `terminal` | Airport names + optional `T1`/`T2` chunk |
-| `price`, `currency`, `cabin` | First quoted fare; `cabin` is the Chinese suffix (e.g. `经济舱`) |
+| `price`, `currency`, `cabin` | First displayed offer including its returned taxes, in CNY (`¥`); cabin is localized (e.g. `经济舱`) |
 | `url` | The search URL (Ctrip's flight cards don't expose per-row stable deeplinks) |
 
 Args:
@@ -130,11 +133,21 @@ Args:
 - `--date` (required) — `YYYY-MM-DD`.
 - `--limit` (1-50, default 20).
 
-Rows are extracted from the rendered `.flight-item` cards (Ctrip migrated the
-flight list to these; they omit a text flight number, so `flightNo` is often
-`null`) because Ctrip's post-load XHR is not currently captured by the daemon
-network buffer (see "Caveats" below). Cards with missing departure/arrival/airline
-are dropped rather than emitted with sentinel values.
+The adapter waits for the results component's `searchIsFinish` flag and reads
+`flightList` from its React state. This includes flights outside the virtualized
+viewport. Only flight and fare fields are projected; booking tokens stay in the
+browser. Direct flights come first, sorted by displayed fare and departure time.
+
+Strategy: `DOM_STATE`, contract: `visible-ui`. Live verification on 2026-09-22
+covered `BJS → SHA` and `SIN → SHA`. The latter returned 9C8598 at ¥1,315,
+matching the page's tax-inclusive fare rather than its ¥700 base fare.
+
+The previous response-interception path returned bodyless `batchSearch` captures
+in the connected Edge session even after the request had completed. A bare
+`.flight-item` also matched a recommended route before search completion. The
+results state provides both completeness and full flight identities without
+replaying the site's internal request. Changes to that state shape fail explicitly
+instead of returning an incomplete or mislabeled price list.
 
 ## Round-Trip Flight Columns (`flight-round`)
 
@@ -322,11 +335,7 @@ scope here.
 Args:
 - `<id>` (positional, required): numeric Ctrip hotel id (discover via `ctrip hotel-suggest`; e.g. `375539`).
 
-The profile is read from `__NEXT_DATA__.props.pageProps.hotelDetailResponse`
-(the same SSR source style as `hotel-search`), surfacing the fields the listing
-row does not carry. Room-level nightly prices load via a post-SSR XHR and are
-out of scope here, the same way `flight`'s post-load price XHR is; `hotel-search`
-already reports a representative nightly price per hotel.
+The command calls `m.ctrip.com/restapi/soa2/33278/getHotelDetailAggregate` directly with profile cookies. It verifies the returned hotel id before mapping metadata and does not navigate to or parse the hotel page. The API requires the current +08 calendar day and following day to include check-in/out policies; these are site-default metadata dates, not a room-price quote. `hotel-search` provides dated listing prices.
 
 ## Notes
 
@@ -339,16 +348,14 @@ already reports a representative nightly price per hotel.
 
 ## Caveats (browser-mode commands)
 
-- **Cookie required**: `hotel-search` / `flight` use `Strategy.COOKIE` against
-  `hotels.ctrip.com` / `flights.ctrip.com`. If Ctrip serves a captcha redirect
-  (suspected bot), an `AuthRequiredError` is raised — complete the captcha in
+- **Browser session required**: `hotel-search` / `hotel` / `flight` use `Strategy.COOKIE` against
+  `hotels.ctrip.com` / `flights.ctrip.com`. A captcha redirect on the flight page, or HTTP
+  401/403/432 from the hotel APIs, raises `AuthRequiredError` — complete the verification in
   your live browser session and retry.
 - **No per-flight deeplink**: Ctrip's flight cards funnel every row through a
   shared booking handoff. Until a stable per-flight `bookingId` surfaces, all
   rows share the search URL.
-- **Round-trip + airline-filter unsupported**: `flight` is one-way only and
-  passes `cabin=Y_S_C_F` (all cabins) in v1. Round-trip + advanced filters
-  tracked in the `#1481` follow-up.
-- **Hotel SSR page size is server-fixed**: passing `&pageSize=N` is ignored
-  upstream — first page returns ~13 rows. Larger result sets would need
-  scroll-paginated DOM extraction (not implemented in v1).
+- **One-way vs round-trip**: `flight` is one-way and passes `cabin=Y_S_C_F`
+  (all cabins). Use `flight-round` for outbound options priced as a round trip.
+  Airline filtering is not exposed.
+- **Hotel pagination**: `hotel-search` calls the API for subsequent pages and rejects repeated or incomplete pages.

@@ -1167,6 +1167,9 @@ describe('browser tab targeting commands', () => {
   beforeEach(() => {
     process.exitCode = undefined;
     process.env.OPENCLI_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'opencli-browser-tab-state-'));
+    // load-bearing: the CLI reads browser-profiles.json from OPENCLI_CONFIG_DIR; without isolation a
+    // developer's real defaultContextId leaks into browserConnect() args and breaks exact-arg asserts.
+    process.env.OPENCLI_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'opencli-browser-tab-config-'));
     consoleLogSpy.mockClear();
     stderrSpy.mockClear();
     mockBrowserConnect.mockClear();

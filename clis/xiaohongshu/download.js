@@ -7,11 +7,10 @@
  * Accepts a full xiaohongshu.com URL with xsec_token or an xhslink short link.
  */
 import { cli, Strategy } from '@jackwener/opencli/registry';
-import { formatCookieHeader } from '@jackwener/opencli/download';
 import { downloadMedia } from '@jackwener/opencli/download/media-download';
 import { CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
-import { readXhsDetailPage } from './risk-control.js';
-import { buildNoteUrl, parseNoteId } from './note-helpers.js';
+import { readNoteApi } from './web-api.js';
+import { buildNoteUrl } from './note-helpers.js';
 /**
  * Build the media-extraction IIFE. The note id is interpolated as a default
  * since the IIFE may also resolve it from `location.pathname`. The CDN
@@ -210,45 +209,51 @@ export const command = cli({
     description: '下载小红书笔记中的图片和视频',
     domain: 'www.xiaohongshu.com',
     strategy: Strategy.COOKIE,
-    navigateBefore: false,
+    navigateBefore: false, siteSession: 'persistent',
     args: [
         { name: 'note-id', positional: true, required: true, help: 'Full Xiaohongshu note URL with xsec_token, or xhslink short link' },
         { name: 'output', default: './xiaohongshu-downloads', help: 'Output directory' },
     ],
     columns: ['index', 'type', 'status', 'size'],
     func: async (page, kwargs) => {
-        const rawInput = String(kwargs['note-id']);
-        const output = kwargs.output;
-        const noteId = parseNoteId(rawInput);
-        // readXhsDetailPage paces the navigation and retries once through a
-        // cooldown if risk control soft-blocks the page (throws SECURITY_BLOCK
-        // when still blocked after the retry).
-        const data = await readXhsDetailPage(page, {
-            url: buildNoteUrl(rawInput, { allowShortLink: true, commandName: 'xiaohongshu download' }),
-            extractJs: buildDownloadExtractJs(noteId),
-            securityHelp: /^https?:\/\//.test(rawInput)
-                ? 'The page may be temporarily restricted. Try again later or from a different session.'
-                : 'Try using a full URL from search results (with xsec_token) instead of a bare note ID.',
-            settleMinS: 1,
-            settleMaxS: 3,
-        });
-        if (!data || typeof data !== 'object' || !Array.isArray(data.media)) {
-            throw new CommandExecutionError('Xiaohongshu media extraction returned malformed payload.');
+        let url = buildNoteUrl(String(kwargs['note-id']), { allowShortLink: true, commandName: 'xiaohongshu download' });
+        for (let hop = 0; new URL(url).hostname === 'xhslink.com'; hop++) {
+            if (hop >= 5) throw new CommandExecutionError('Xiaohongshu short link exceeded five redirects');
+            const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(15000) });
+            const target = response.headers.get('location');
+            if (![301, 302, 303, 307, 308].includes(response.status) || !target) throw new CommandExecutionError('Xiaohongshu short link did not return a note redirect');
+            const next = new URL(target, url);
+            if (next.protocol !== 'https:' || !['xhslink.com', 'www.xiaohongshu.com', 'xiaohongshu.com'].includes(next.hostname)) throw new CommandExecutionError('Xiaohongshu short link redirected outside the expected site');
+            url = next.href;
         }
-        if (data.media.length === 0) {
-            throw new EmptyResultError('xiaohongshu download', 'No downloadable media found on this note.');
+        const note = await readNoteApi(page, url);
+        const media = [];
+        if (note.type === 'video') {
+            const streams = Object.values(note.video?.media?.stream || {}).flat();
+            const candidates = streams.filter((stream) => typeof stream.masterUrl === 'string').sort((a, b) => (b.avgBitrate || 0) - (a.avgBitrate || 0));
+            if (candidates.length) media.push({ type: 'video', url: candidates[0].masterUrl });
+        } else {
+            if (!Array.isArray(note.imageList)) throw new CommandExecutionError('Xiaohongshu note omitted its image list');
+            for (const image of note.imageList) {
+                const imageUrl = image.urlDefault || image.infoList?.find((entry) => entry.imageScene === 'WB_DFT')?.url || image.urlPre;
+                if (!imageUrl) throw new CommandExecutionError('Xiaohongshu note omitted an image URL');
+                media.push({ type: 'image', url: imageUrl });
+            }
         }
-        // Extract cookies for authenticated downloads
-        const cookies = formatCookieHeader(await page.getCookies({ domain: 'xiaohongshu.com' }));
-        const resolvedNoteId = typeof data.noteId === 'string' && data.noteId.trim()
-            ? data.noteId.trim()
-            : noteId;
-        return downloadMedia(data.media, {
-            output,
-            subdir: resolvedNoteId,
-            cookies,
-            filenamePrefix: resolvedNoteId,
-            timeout: 60000,
-        });
+        if (!media.length) throw new EmptyResultError('xiaohongshu download', 'The note has no downloadable media');
+        for (const item of media) {
+            let mediaUrl;
+            try { mediaUrl = new URL(item.url); }
+            catch { throw new CommandExecutionError('Xiaohongshu returned an invalid media URL'); }
+            if (!['https:', 'http:'].includes(mediaUrl.protocol) || mediaUrl.username || mediaUrl.password || mediaUrl.port ||
+                !['xhscdn.com', 'xiaohongshu.com'].some((host) => mediaUrl.hostname === host || mediaUrl.hostname.endsWith(`.${host}`))) {
+                throw new CommandExecutionError('Xiaohongshu returned a media URL outside its HTTPS media hosts');
+            }
+            // The API still emits HTTP CDN URLs; the same resources are served over HTTPS.
+            mediaUrl.protocol = 'https:';
+            item.url = mediaUrl.href;
+        }
+        // Signed CDN URLs carry their own access context; never forward the main-site session Cookie.
+        return downloadMedia(media, { output: kwargs.output, subdir: note.noteId, filenamePrefix: note.noteId, timeout: 60000 });
     },
 });

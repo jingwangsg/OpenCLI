@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { getRegistry } from '@jackwener/opencli/registry';
 import './search.js';
@@ -27,7 +27,6 @@ import {
     buildFerryExtractJs,
     buildFerryListUrl,
     buildFlightExtractJs,
-    buildHotelDetailExtractJs,
     buildHotelDetailUrl,
     buildPackageListUrl,
     buildScrollUntilJs,
@@ -48,10 +47,9 @@ import {
     parsePlaceName,
     pickCoords,
     pickHotelMapCoords,
-    WAIT_FOR_HOTEL_DETAIL_JS,
 } from './utils.js';
 
-function createPageMock(evaluateResults, networkCaptures = []) {
+function createPageMock(evaluateResults) {
     const evaluate = vi.fn();
     for (const result of evaluateResults) {
         evaluate.mockResolvedValueOnce(result);
@@ -63,10 +61,6 @@ function createPageMock(evaluateResults, networkCaptures = []) {
         scroll: vi.fn().mockResolvedValue(undefined),
         autoScroll: vi.fn().mockResolvedValue(undefined),
         getCookies: vi.fn().mockResolvedValue([]),
-        startNetworkCapture: vi.fn().mockResolvedValue(true),
-        readNetworkCapture: vi.fn()
-            .mockResolvedValueOnce([])
-            .mockResolvedValueOnce(networkCaptures),
     };
 }
 
@@ -450,6 +444,7 @@ describe('ctrip mapHotelRow', () => {
 });
 
 describe('ctrip hotel-search command (registry-level)', () => {
+    afterEach(() => vi.unstubAllGlobals());
     const cmd = getRegistry().get('ctrip/hotel-search');
 
     const SHANGHAI_HOTEL = {
@@ -491,71 +486,53 @@ describe('ctrip hotel-search command (registry-level)', () => {
         expect(page.goto).not.toHaveBeenCalled();
     });
 
-    it('throws AuthRequired when captcha gate is detected', async () => {
-        const page = createPageMock(['captcha']);
-        await expect(cmd.func(page, { city: 2, checkin: '2026-06-15', checkout: '2026-06-17', limit: 5 }))
-            .rejects.toThrow('Ctrip is asking for a captcha');
-        // No extract call when captcha caught early
-        expect(page.evaluate).toHaveBeenCalledTimes(1);
+    it('reports API verification and malformed responses without returning partial rows', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 403 })));
+        await expect(cmd.func(createPageMock([]), { city: 2, checkin: '2026-06-15', checkout: '2026-06-17', limit: 1 }))
+            .rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
+        vi.stubGlobal('fetch', vi.fn(async () => ok({ data: { hotelList: [] } })));
+        await expect(cmd.func(createPageMock([]), { city: 2, checkin: '2026-06-15', checkout: '2026-06-17', limit: 1 }))
+            .rejects.toMatchObject({ code: 'COMMAND_EXEC' });
     });
 
-    it('throws EmptyResultError when SSR hotelList is empty', async () => {
-        const page = createPageMock(['content', []]);
-        await expect(cmd.func(page, { city: 9999, checkin: '2026-06-15', checkout: '2026-06-17', limit: 5 }))
+    it('reports a complete empty API page as no results', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => ok({ ResponseStatus: { Ack: 'Success' },
+            data: { pagingInfo: { pageIndex: 1 }, hotelList: [] } })));
+        await expect(cmd.func(createPageMock([]), { city: 9999, checkin: '2026-06-15', checkout: '2026-06-17', limit: 5 }))
             .rejects.toMatchObject({ code: 'EMPTY_RESULT' });
     });
 
-    it('waits for an empty SSR hotelList so empty results do not become timeout failures', async () => {
-        const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-            url: 'https://hotels.ctrip.com/hotels/list?city=9999',
-            runScripts: 'outside-only',
-        });
-        dom.window.__NEXT_DATA__ = {
-            props: { pageProps: { initListData: { hotelList: [] } } },
-        };
-        await expect(dom.window.Function(`return (${hotelSearchTest.WAIT_FOR_SSR_JS})`)())
-            .resolves.toBe('content');
-    });
-
-    it('throws CommandExecutionError when SSR state times out or is malformed', async () => {
-        await expect(cmd.func(createPageMock(['timeout']), { city: 2, checkin: '2026-06-15', checkout: '2026-06-17', limit: 5 }))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('did not expose SSR hotel list') });
-        await expect(cmd.func(createPageMock(['content', { hotelList: [] }]), { city: 2, checkin: '2026-06-15', checkout: '2026-06-17', limit: 5 }))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('malformed SSR hotel list') });
-    });
-
-    it('maps SSR rows and respects --limit', async () => {
-        const page = createPageMock([
-            'content',
-            [SHANGHAI_HOTEL, { ...SHANGHAI_HOTEL, hotelInfo: { ...SHANGHAI_HOTEL.hotelInfo, summary: { hotelId: '2' } } }],
-        ]);
-        const rows = await cmd.func(page, { city: 2, checkin: '2026-06-15', checkout: '2026-06-17', limit: 1 });
-        expect(rows).toHaveLength(1);
+    it('requests the city and dates directly and paginates while preserving public columns', async () => {
+        const pages = [];
+        vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+            expect(url).toBe('https://m.ctrip.com/restapi/soa2/34951/fetchHotelList');
+            const body = JSON.parse(options.body);
+            expect(body.destination.geo.cityId).toBe(2);
+            expect(body.date.dateInfo).toMatchObject({ checkInDate: '20260615', checkOutDate: '20260617' });
+            expect(body.head).toMatchObject({ bu: 'HBU', group: 'ctrip', locale: 'zh-CN', currency: 'CNY' });
+            expect(body.filters).toContainEqual({ filterId: '29|1', subType: '2', type: '29', value: '1|1' });
+            const index = body.paging.pageIndex;
+            pages.push(index);
+            const hotel = index === 1 ? SHANGHAI_HOTEL
+                : { ...SHANGHAI_HOTEL, hotelInfo: { ...SHANGHAI_HOTEL.hotelInfo, summary: { hotelId: '2' } } };
+            return ok({ ResponseStatus: { Ack: 'Success' }, data: { pagingInfo: { pageIndex: index }, hotelList: [hotel] } });
+        }));
+        const page = createPageMock([]);
+        const rows = await cmd.func(page, { city: 2, checkin: '2026-06-15', checkout: '2026-06-17', limit: 2 });
+        expect(pages).toEqual([1, 2]);
+        expect(rows.map((row) => row.hotelId)).toEqual(['106876528', '2']);
         expect(rows[0]).toMatchObject({ rank: 1, hotelId: '106876528', name: '上海外滩滨江珍宝酒店', star: 4, price: 548 });
-        // Every declared column appears on every row
-        for (const row of rows) {
-            for (const col of cmd.columns) expect(row).toHaveProperty(col);
-        }
-        // Single goto, single URL
-        expect(page.goto).toHaveBeenCalledTimes(1);
-        expect(page.goto.mock.calls[0][0]).toContain('city=2');
-        expect(page.goto.mock.calls[0][0]).toContain('checkin=2026-06-15');
-        expect(page.goto.mock.calls[0][0]).toContain('checkout=2026-06-17');
+        for (const row of rows) for (const column of cmd.columns) expect(row).toHaveProperty(column);
+        expect(page.goto).not.toHaveBeenCalled();
+        expect(page.evaluate).not.toHaveBeenCalled();
     });
 
-    it('filters out SSR rows missing hotelId or name (no silent partial rows)', async () => {
-        const incomplete = { hotelInfo: { summary: {}, nameInfo: { name: 'No-id' } }, roomInfo: [] };
-        const page = createPageMock(['content', [incomplete, SHANGHAI_HOTEL]]);
-        const rows = await cmd.func(page, { city: 2, checkin: '2026-06-15', checkout: '2026-06-17', limit: 5 });
-        expect(rows).toHaveLength(1);
-        expect(rows[0].hotelId).toBe('106876528');
-    });
-
-    it('throws CommandExecutionError when all SSR rows miss required anchors', async () => {
-        const incomplete = { hotelInfo: { summary: {}, nameInfo: { name: 'No-id' } }, roomInfo: [] };
-        const page = createPageMock(['content', [incomplete]]);
-        await expect(cmd.func(page, { city: 2, checkin: '2026-06-15', checkout: '2026-06-17', limit: 5 }))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('required hotelId/name anchors') });
+    it('rejects API rows missing a stable identity', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => ok({ ResponseStatus: { Ack: 'Success' }, data: {
+            pagingInfo: { pageIndex: 1 }, hotelList: [{ hotelInfo: { summary: {}, nameInfo: { name: 'No-id' } }, roomInfo: [] }],
+        } })));
+        await expect(cmd.func(createPageMock([]), { city: 2, checkin: '2026-06-15', checkout: '2026-06-17', limit: 5 }))
+            .rejects.toMatchObject({ code: 'COMMAND_EXEC' });
     });
 });
 
@@ -584,23 +561,9 @@ describe('ctrip flight command (registry-level)', () => {
         };
     }
 
-    function batchPayload(flightItineraryList, { finished = true, status = 0, msg = 'success' } = {}) {
-        return { status, msg, data: { context: { finished }, flightItineraryList } };
-    }
-
-    function batchCapture(payload, overrides = {}) {
-        return {
-            url: 'https://flights.ctrip.com/international/search/api/search/batchSearch?v=1',
-            responseStatus: 200,
-            responsePreview: JSON.stringify(payload),
-            ...overrides,
-        };
-    }
-
-    it('declares Strategy.INTERCEPT + browser:true + navigateBefore:false + access:read', () => {
+    it('declares a browser read with navigation owned by the adapter', () => {
         expect(cmd.access).toBe('read');
         expect(cmd.browser).toBe(true);
-        expect(String(cmd.strategy)).toContain('intercept');
         expect(cmd.navigateBefore).toBe(false);
         expect(cmd.domain).toBe('flights.ctrip.com');
     });
@@ -615,58 +578,50 @@ describe('ctrip flight command (registry-level)', () => {
             .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('--date') });
         await expect(cmd.func(page, { from: 'PEK', to: 'SHA', date: '2026-06-15', limit: 0 }))
             .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('--limit') });
-        expect(page.startNetworkCapture).not.toHaveBeenCalled();
         expect(page.goto).not.toHaveBeenCalled();
     });
 
-    it('throws AuthRequired when no capture arrives behind a captcha gate', async () => {
-        const page = createPageMock(['captcha']);
-        await expect(cmd.func(page, { from: 'PEK', to: 'SHA', date: '2026-06-15', limit: 5 }))
-            .rejects.toThrow('Ctrip is asking for a captcha');
-        expect(page.evaluate).toHaveBeenCalledTimes(1);
-    });
-
-    it('throws TimeoutError when no capture arrives without a captcha', async () => {
-        const page = createPageMock(['timeout']);
-        await expect(cmd.func(page, { from: 'PEK', to: 'SHA', date: '2026-06-15', limit: 5 }))
-            .rejects.toMatchObject({ code: 'TIMEOUT', message: expect.stringContaining('Ctrip flight API capture') });
-    });
-
-    it('throws EmptyResultError only for a completed empty search', async () => {
-        const page = createPageMock([], [batchCapture(batchPayload([]))]);
-        await expect(cmd.func(page, { from: 'PEK', to: 'SHA', date: '2026-06-15', limit: 5 }))
-            .rejects.toMatchObject({ code: 'EMPTY_RESULT' });
-    });
-
-    it('rejects auth HTTP, other HTTP, invalid JSON, upstream, malformed, truncated, and unfinished responses', async () => {
-        const args = { from: 'PEK', to: 'SHA', date: '2026-06-15', limit: 5 };
-        await expect(cmd.func(createPageMock([], [batchCapture({}, { responseStatus: 401 })]), args))
-            .rejects.toMatchObject({ code: 'AUTH_REQUIRED', message: expect.stringContaining('HTTP 401') });
-        await expect(cmd.func(createPageMock([], [batchCapture({}, { responseStatus: 500 })]), args))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('HTTP 500') });
-        await expect(cmd.func(createPageMock([], [batchCapture({}, { responsePreview: '{' })]), args))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('invalid JSON') });
-        await expect(cmd.func(createPageMock([], [batchCapture(batchPayload([], { status: 7, msg: 'denied' }))]), args))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('status=7') });
-        await expect(cmd.func(createPageMock([], [batchCapture({ status: 0, data: {} })]), args))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('malformed batchSearch') });
-        await expect(cmd.func(createPageMock([], [batchCapture({}, { responseBodyTruncated: true })]), args))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('capture limit') });
-        await expect(cmd.func(createPageMock([], [batchCapture(batchPayload([itinerary()], { finished: false }))]), args))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('reported completion') });
+    it.each([
+        ['captcha', 'AUTH_REQUIRED'], ['timeout', 'TIMEOUT'], ['malformed', 'COMMAND_EXEC'], [[], 'EMPTY_RESULT'],
+    ])('reports the page outcome %j as %s', async (result, code) => {
+        await expect(cmd.func(createPageMock([result]), { from: 'PEK', to: 'SHA', date: '2026-06-15', limit: 5 }))
+            .rejects.toMatchObject({ code });
     });
 
     it('builds URL with lowercase IATA codes and Y_S_C_F cabin', async () => {
-        const page = createPageMock([], [batchCapture(batchPayload([itinerary()]))]);
+        const page = createPageMock([[itinerary()]]);
         await cmd.func(page, { from: 'pek', to: 'sha', date: '2026-06-15', limit: 1 });
         const url = page.goto.mock.calls[0][0];
         expect(url).toContain('oneway-pek-sha');
         expect(url).toContain('depdate=2026-06-15');
         expect(url).toContain('cabin=Y_S_C_F');
         expect(url).toContain('adult=1');
-        expect(page.startNetworkCapture).toHaveBeenCalledWith('/international/search/api/search/batchSearch');
-        expect(page.startNetworkCapture.mock.invocationCallOrder[0])
-            .toBeLessThan(page.goto.mock.invocationCallOrder[0]);
+    });
+
+    it('waits for completed list state, ignores recommendations, and preserves the displayed tax-inclusive fare', async () => {
+        const dom = new JSDOM('<div class="flight-item">石家庄上海</div><div class="flight-list"></div>', {
+            url: 'https://flights.ctrip.com/online/list/oneway-sin-sha', runScripts: 'outside-only',
+        });
+        const flight = itinerary({ price: 700 });
+        flight.priceList[0].totalPriceWithTax = 1315;
+        flight.priceList[0].routeSearchToken = 'private-booking-token';
+        const props = { searchIsFinish: false, flightList: { toJS: () => [flight] } };
+        dom.window.document.querySelector('.flight-list').__reactFiber$test = { memoizedProps: props };
+        const page = createPageMock([]);
+        page.evaluate.mockImplementation((js) => dom.window.eval(js));
+        let resolved = false;
+        const pending = cmd.func(page, { from: 'SIN', to: 'SHA', date: '2026-10-15', limit: 1 })
+            .then((rows) => { resolved = true; return rows; });
+        try {
+            await vi.waitFor(() => expect(page.evaluate).toHaveBeenCalled());
+            expect(resolved).toBe(false);
+            props.searchIsFinish = true;
+            const rows = await pending;
+            expect(rows).toEqual([expect.objectContaining({ flightNo: 'MF8561', price: 1315 })]);
+            expect(JSON.stringify(rows)).not.toContain('private-booking-token');
+        } finally {
+            dom.window.close();
+        }
     });
 
     it('maps and sorts structured itineraries, fixes overnight fields, and respects --limit', async () => {
@@ -675,9 +630,9 @@ describe('ctrip flight command (registry-level)', () => {
             departure: '2026-06-15 22:55:00', departureAirport: '首都国际机场',
             arrival: '2026-06-16 00:55:00', arrivalAirport: '浦东国际机场', price: 450,
         });
-        const page = createPageMock([], [batchCapture(batchPayload([
+        const page = createPageMock([[
             itinerary({ id: 'MF8561_1', price: 487 }), laterCheap,
-        ]))]);
+        ]]);
         const rows = await cmd.func(page, { from: 'PEK', to: 'SHA', date: '2026-06-15', limit: 1 });
         expect(rows).toHaveLength(1);
         expect(rows[0]).toMatchObject({
@@ -700,12 +655,12 @@ describe('ctrip flight command (registry-level)', () => {
     it('rejects any malformed itinerary instead of returning accumulated partial rows', async () => {
         const malformed = itinerary({ id: 'MF8561_2' });
         malformed.flightSegments[0].flightList[0].arrivalAirportName = '';
-        const page = createPageMock([], [batchCapture(batchPayload([itinerary(), malformed]))]);
+        const page = createPageMock([[itinerary(), malformed]]);
         await expect(cmd.func(page, { from: 'PEK', to: 'SHA', date: '2026-06-15', limit: 5 }))
             .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('index 1') });
     });
 
-    it('merges multiple completed batches, deduplicates itineraries, and joins connecting legs', async () => {
+    it('joins connecting legs into a complete itinerary', async () => {
         const connecting = itinerary({
             id: 'MU1_MU2', airline: '东方航空', price: 750, cabin: '@Y-Y',
             legs: [
@@ -713,14 +668,7 @@ describe('ctrip flight command (registry-level)', () => {
                 { flightNo: 'MU2', aircraftName: '空客320(中)', departureDateTime: '2026-06-15 20:00:00', departureAirportName: '武汉天河机场', arrivalDateTime: '2026-06-15 21:55:00', arrivalAirportName: '虹桥国际机场', arrivalTerminal: 'T2' },
             ],
         });
-        const page = createPageMock([]);
-        page.readNetworkCapture
-            .mockReset()
-            .mockResolvedValueOnce([])
-            .mockResolvedValueOnce([
-                batchCapture(batchPayload([connecting], { finished: false })),
-                batchCapture(batchPayload([connecting], { finished: true }), { url: 'https://flights.ctrip.com/international/search/api/search/batchSearch?v=2' }),
-            ]);
+        const page = createPageMock([[connecting]]);
         const rows = await cmd.func(page, { from: 'PEK', to: 'SHA', date: '2026-06-15', limit: 5 });
         expect(rows).toHaveLength(1);
         expect(rows[0]).toMatchObject({
@@ -741,7 +689,7 @@ describe('ctrip flight command (registry-level)', () => {
                 { flightNo: 'MU2', aircraftName: '空客320(中)', departureDateTime: '2026-06-15 11:00:00', departureAirportName: '武汉天河机场', arrivalDateTime: '2026-06-15 13:00:00', arrivalAirportName: '虹桥国际机场', arrivalTerminal: 'T2' },
             ],
         });
-        const rows = await cmd.func(createPageMock([], [batchCapture(batchPayload([transfer, direct]))]), {
+        const rows = await cmd.func(createPageMock([[transfer, direct]]), {
             from: 'PEK', to: 'SHA', date: '2026-06-15', limit: 2,
         });
         expect(rows.map((row) => row.flightNo)).toEqual(['MF8561', 'MU1 / MU2']);
@@ -1155,7 +1103,7 @@ describe('ctrip buildTrainExtractJs (JSDOM)', () => {
     });
 });
 
-const HOTEL_DETAIL_SSR = {
+const HOTEL_DETAIL_DATA = {
     hotelBaseInfo: {
         masterHotelId: 375539,
         cityName: '上海',
@@ -1192,7 +1140,7 @@ const HOTEL_DETAIL_SSR = {
     },
 };
 
-// Shape as projected by buildHotelDetailExtractJs (what page.evaluate returns).
+// Existing public metadata projection, preserved by the API migration.
 const HOTEL_DETAIL_ROW = {
     hotelId: '375539',
     name: '上海和平饭店',
@@ -1230,6 +1178,7 @@ describe('ctrip buildHotelDetailUrl', () => {
 });
 
 describe('ctrip hotel command (registry-level)', () => {
+    afterEach(() => vi.unstubAllGlobals());
     const cmd = getRegistry().get('ctrip/hotel');
 
     it('declares Strategy.COOKIE + browser:true + navigateBefore:false + access:read', () => {
@@ -1249,74 +1198,42 @@ describe('ctrip hotel command (registry-level)', () => {
         expect(page.goto).not.toHaveBeenCalled();
     });
 
-    it('throws AuthRequired when captcha gate is detected', async () => {
-        const page = createPageMock(['captcha']);
-        await expect(cmd.func(page, { id: 375539 }))
-            .rejects.toThrow('Ctrip is asking for a captcha');
-        expect(page.evaluate).toHaveBeenCalledTimes(1);
+    it('reports verification, malformed API responses, and absent profiles', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 403 })));
+        await expect(cmd.func(createPageMock([]), { id: '375539' })).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
+        vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')));
+        await expect(cmd.func(createPageMock([]), { id: '375539' })).rejects.toMatchObject({ code: 'COMMAND_EXEC' });
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ResponseStatus: { Ack: 'Success' }, data: {} }))));
+        await expect(cmd.func(createPageMock([]), { id: '375539' })).rejects.toMatchObject({ code: 'EMPTY_RESULT' });
     });
 
-    it('throws CommandExecutionError on SSR timeout and on malformed extraction', async () => {
-        await expect(cmd.func(createPageMock(['timeout']), { id: 375539 }))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('did not expose SSR hotel data') });
-        await expect(cmd.func(createPageMock(['content', null]), { id: 375539 }))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('malformed data') });
+    it('maps the API response to the existing metadata fields without browser navigation', async () => {
+        vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+            expect(url).toBe('https://m.ctrip.com/restapi/soa2/33278/getHotelDetailAggregate');
+            const body = JSON.parse(options.body);
+            expect(body.hotelId).toBe(375539);
+            expect(body.checkIn).toMatch(/^\d{8}$/);
+            expect(body.checkOut).toMatch(/^\d{8}$/);
+            expect(body.checkIn < body.checkOut).toBe(true);
+            return new Response(JSON.stringify({ ResponseStatus: { Ack: 'Success' }, data: HOTEL_DETAIL_DATA }));
+        }));
+        const page = createPageMock([]);
+        const rows = await cmd.func(page, { id: '375539' });
+        expect(rows).toEqual([{ ...HOTEL_DETAIL_ROW, url: buildHotelDetailUrl(375539) }]);
+        expect(page.goto).not.toHaveBeenCalled();
+        expect(page.evaluate).not.toHaveBeenCalled();
     });
 
-    it('throws EmptyResultError when the SSR profile lacks id or name', async () => {
-        await expect(cmd.func(createPageMock(['content', { hotelId: null, name: null }]), { id: 375539 }))
-            .rejects.toMatchObject({ code: 'EMPTY_RESULT' });
+    it('rejects a whitespace-only hotel name after normalization', async () => {
+        const data = structuredClone(HOTEL_DETAIL_DATA);
+        data.hotelBaseInfo.nameInfo.name = '  \n ';
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ResponseStatus: { Ack: 'Success' }, data }))));
+        await expect(cmd.func(createPageMock([]), { id: '375539' })).rejects.toMatchObject({ code: 'EMPTY_RESULT' });
     });
 
-    it('maps the SSR profile into a single row carrying every declared column', async () => {
-        const page = createPageMock(['content', HOTEL_DETAIL_ROW]);
-        const rows = await cmd.func(page, { id: 375539 });
-        expect(rows).toHaveLength(1);
-        expect(rows[0]).toMatchObject({
-            hotelId: '375539',
-            name: '上海和平饭店',
-            star: 5,
-            score: 4.8,
-            ratingBreakdown: '卫生 4.8 / 设施 4.8 / 环境 4.8 / 服务 4.8',
-            facilities: '接机服务 / 无线WIFI免费',
-            url: 'https://hotels.ctrip.com/hotels/detail/?hotelid=375539',
-        });
-        for (const row of rows) {
-            for (const col of cmd.columns) expect(row).toHaveProperty(col);
-        }
-        expect(page.goto).toHaveBeenCalledTimes(1);
-        expect(page.goto.mock.calls[0][0]).toContain('hotelid=375539');
-    });
-});
-
-describe('ctrip buildHotelDetailExtractJs (JSDOM)', () => {
-    function runExtract(nextData) {
-        const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-            url: 'https://hotels.ctrip.com/hotels/detail/?hotelid=375539',
-            runScripts: 'outside-only',
-        });
-        dom.window.__NEXT_DATA__ = nextData;
-        const js = buildHotelDetailExtractJs();
-        return dom.window.Function(`return (${js})`)();
-    }
-
-    it('projects the hotel profile, joining sub-scores / facilities / policy', () => {
-        const out = runExtract({ props: { pageProps: { hotelDetailResponse: HOTEL_DETAIL_SSR } } });
-        expect(out).toEqual(HOTEL_DETAIL_ROW);
-    });
-
-    it('returns null when the SSR detail block is absent', () => {
-        expect(runExtract({ props: { pageProps: {} } })).toBeNull();
-    });
-
-    it('detects the rendered SSR block as content via WAIT_FOR_HOTEL_DETAIL_JS', async () => {
-        const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-            url: 'https://hotels.ctrip.com/hotels/detail/?hotelid=375539',
-            runScripts: 'outside-only',
-        });
-        dom.window.__NEXT_DATA__ = { props: { pageProps: { hotelDetailResponse: HOTEL_DETAIL_SSR } } };
-        await expect(dom.window.Function(`return (${WAIT_FOR_HOTEL_DETAIL_JS})`)())
-            .resolves.toBe('content');
+    it('rejects a valid profile belonging to a different hotel', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ResponseStatus: { Ack: 'Success' }, data: HOTEL_DETAIL_DATA }))));
+        await expect(cmd.func(createPageMock([]), { id: '999' })).rejects.toMatchObject({ code: 'COMMAND_EXEC' });
     });
 });
 

@@ -1,48 +1,12 @@
 /**
- * Xiaohongshu search — DOM-based extraction from search results page.
- * The previous Pinia store + XHR interception approach broke because
- * the API now returns empty items. This version navigates directly to
- * the search results page and extracts data from rendered DOM elements.
- * Ref: https://github.com/jackwener/opencli/issues/10
+ * Xiaohongshu search through the signed web API.
+ *
+ * load-bearing: buildScrollUntilJs, buildSearchExtractJs and noteIdToDate stay
+ * exported because rednote/search.js still drives the DOM search with them.
  */
 import { cli, Strategy } from '@jackwener/opencli/registry';
-import { ArgumentError, AuthRequiredError, CliError, CommandExecutionError, EmptyResultError, TimeoutError } from '@jackwener/opencli/errors';
-import { unwrapEvaluateResult } from './shared.js';
-/**
- * Wait for search results or login wall using MutationObserver (max 5s).
- * Returns 'content' if note items appeared, a typed wall state when login or
- * risk controls appear, or 'timeout' if none appears within the deadline.
- *
- * Note-item detection tries the legacy `section.note-item` class first
- * (still observed in many sessions, including rednote) and falls back to
- * a `<section>` element containing a `/search_result/` or `/explore/`
- * link. Issue #1506 reports the class being dropped on some xhs renders.
- */
-const WAIT_FOR_CONTENT_JS = `
-  new Promise((resolve) => {
-    const findNoteCard = () => document.querySelector(
-      'section.note-item, section:has(a[href*="/search_result/"]), section:has(a[href*="/explore/"])'
-    );
-    const detect = () => {
-      if (findNoteCard()) return 'content';
-      const bodyText = document.body?.innerText || '';
-      if (/登录后查看搜索结果/.test(bodyText) || document.querySelector('#login-btn')) return 'login_wall';
-      if (/请求太频繁|访问频次异常|安全限制/.test(bodyText)) return 'security_block';
-      return null;
-    };
-    const found = detect();
-    if (found) return resolve(found);
-    const observer = new MutationObserver(() => {
-      const result = detect();
-      if (result) { observer.disconnect(); resolve(result); }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-    setTimeout(() => { observer.disconnect(); resolve('timeout'); }, 5000);
-  })
-`;
-const DEFAULT_HARVEST_STEP = 900;
-const CONTENT_WAIT_SECONDS = 5;
-const FILTER_SETTLE_SECONDS = 8;
+import { ArgumentError, CommandExecutionError } from '@jackwener/opencli/errors';
+import { callWebApi } from './web-api.js';
 
 const SEARCH_FILTERS = [
     {
@@ -66,104 +30,6 @@ const SEARCH_FILTERS = [
         options: { all: '不限', 'same-city': '同城', nearby: '附近' },
     },
 ];
-
-function isCollapsedRender(diag) {
-    return diag.cardCount > 1 &&
-        diag.feedClientHeight === 0 &&
-        diag.distinctCardTops === 1;
-}
-
-function harvestOptionsForLimit(limit) {
-    return {
-        maxRounds: 12 + Math.ceil((limit - 1) * 48 / 99),
-        // Browser Bridge/CDP evaluates time out at 60s. Keep enough headroom
-        // for serialization and transport even at --limit 100.
-        budgetMs: 10_000 + Math.ceil((limit - 1) * 35_000 / 99),
-        step: DEFAULT_HARVEST_STEP,
-    };
-}
-
-export function noteUrlInfo(url, webHost = '') {
-    if (typeof url !== 'string' || !url)
-        return { key: '', signed: false };
-    try {
-        const parsed = new URL(url);
-        const expectedHost = String(webHost || '').toLowerCase();
-        if (parsed.protocol !== 'https:' || (expectedHost && parsed.hostname.toLowerCase() !== expectedHost)) {
-            return { key: '', signed: false };
-        }
-        const match = parsed.pathname.match(/^\/(?:search_result|explore|note)\/([0-9a-f]{24})\/?$/i);
-        return {
-            key: match ? match[1].toLowerCase() : '',
-            signed: Boolean(parsed.searchParams.get('xsec_token')?.trim()),
-        };
-    }
-    catch {
-        return { key: '', signed: false };
-    }
-}
-
-export function noteKeyFromUrl(url, webHost = '') {
-    return noteUrlInfo(url, webHost).key;
-}
-
-export function mergeHarvestedRow(acc, row, webHost = '') {
-    const url = typeof row?.url === 'string' ? row.url : '';
-    const info = noteUrlInfo(url, webHost);
-    const key = info.key;
-    if (!key)
-        return false;
-    const prev = acc.get(key);
-    if (!prev) {
-        acc.set(key, { ...row });
-        return true;
-    }
-    let changed = false;
-    for (const field of ['title', 'author', 'author_url']) {
-        if (!prev[field] && row?.[field]) {
-            prev[field] = row[field];
-            changed = true;
-        }
-    }
-    if ((!prev.likes || prev.likes === '0') && row?.likes && row.likes !== '0') {
-        prev.likes = row.likes;
-        changed = true;
-    }
-    if (info.signed && !noteUrlInfo(prev.url, webHost).signed) {
-        prev.url = url;
-        changed = true;
-    }
-    return changed;
-}
-
-/**
- * Counts rows that would survive the title filter applied after harvesting.
- * Masonry cards expose their link before their title, so a freshly discovered
- * card is not yet a usable result.
- */
-export function usableRowCount(acc) {
-    let count = 0;
-    for (const row of acc.values()) {
-        if (row?.title)
-            count++;
-    }
-    return count;
-}
-
-export function shouldStopScrolling(state) {
-    if (state.collected >= state.target)
-        return { stop: true, reason: 'target' };
-    if (state.elapsedMs >= state.budgetMs)
-        return { stop: true, reason: 'budget' };
-    if (state.round >= state.maxRounds)
-        return { stop: true, reason: 'max-rounds' };
-    if (state.idleRounds >= 3)
-        return { stop: true, reason: state.atBottom ? 'exhausted' : 'wedged' };
-    // No-new-row plateaus alone are not terminal. An idle round requires
-    // both unchanged harvested data and unchanged scroll geometry, so a
-    // slow height expansion or a still-moving viewport remains progress.
-    return { stop: false, reason: '' };
-}
 
 /**
  * Extract approximate publish date from a Xiaohongshu note URL.
@@ -274,53 +140,6 @@ function extractSearchRows(webHost) {
     }
     return results;
 }
-
-function isTrustedAuthorUrl(url, webHost) {
-    if (url === '')
-        return true;
-    try {
-        const parsed = new URL(url);
-        return parsed.protocol === 'https:' &&
-            parsed.hostname.toLowerCase() === webHost.toLowerCase() &&
-            /^\/user\/profile\/[^/]+\/?$/i.test(parsed.pathname);
-    }
-    catch {
-        return false;
-    }
-}
-function requireTrustedHarvestRow(row, index, webHost) {
-    if (!row || typeof row !== 'object' || Array.isArray(row)) {
-        throw new CommandExecutionError(`Unexpected Xiaohongshu search harvest row ${index + 1} shape; expected an object.`);
-    }
-    for (const field of ['title', 'author', 'likes', 'url', 'author_url']) {
-        if (typeof row[field] !== 'string') {
-            throw new CommandExecutionError(`Unexpected Xiaohongshu search harvest row ${index + 1} shape; expected string ${field}.`);
-        }
-    }
-    if (!noteUrlInfo(row.url, webHost).key) {
-        throw new CommandExecutionError(`Unexpected Xiaohongshu search harvest row ${index + 1} URL; expected a trusted note URL.`);
-    }
-    if (!isTrustedAuthorUrl(row.author_url, webHost)) {
-        throw new CommandExecutionError(`Unexpected Xiaohongshu search harvest row ${index + 1} author URL; expected a trusted profile URL.`);
-    }
-    return row;
-}
-function requireHarvestPayload(payload, webHost) {
-    const result = unwrapEvaluateResult(payload);
-    const diag = result?.diag;
-    if (!result || typeof result !== 'object' || Array.isArray(result) || !Array.isArray(result.rows) ||
-        !diag || typeof diag !== 'object' || Array.isArray(diag) ||
-        typeof diag.securityBlock !== 'boolean' || typeof diag.stopReason !== 'string' ||
-        !Number.isFinite(diag.scrollHeight) || diag.scrollHeight < 0 ||
-        !Number.isFinite(diag.clientHeight) || diag.clientHeight < 0 ||
-        !Number.isSafeInteger(diag.cardCount) || diag.cardCount < 0 ||
-        !(diag.feedClientHeight === null || (Number.isFinite(diag.feedClientHeight) && diag.feedClientHeight >= 0)) ||
-        !Number.isSafeInteger(diag.distinctCardTops) || diag.distinctCardTops < 0) {
-        throw new CommandExecutionError('Unexpected Xiaohongshu search harvest payload shape; expected rows plus typed diagnostics.');
-    }
-    result.rows = result.rows.map((row, index) => requireTrustedHarvestRow(row, index, webHost));
-    return result;
-}
 export function parseLimit(raw) {
     const parsed = Number(raw ?? 20);
     if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
@@ -341,185 +160,8 @@ function resolveSearchFilters(kwargs) {
                 `--${definition.arg} must be one of: ${Object.keys(definition.options).join(', ')}, got ${JSON.stringify(value)}`,
             );
         }
-        return {
-            group: definition.group,
-            option,
-            capability: value === definition.defaultValue
-                ? ''
-                : definition.arg === 'location'
-                    ? 'location'
-                    : definition.arg === 'scope'
-                        ? 'account'
-                        : '',
-        };
+        return { group: definition.group, option };
     });
-}
-
-function buildApplySearchFiltersJs(requestedFilters) {
-    return `
-      (async () => {
-        const requestedFilters = ${JSON.stringify(requestedFilters)};
-        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-        const text = (element) => (element?.textContent || '').replace(/\\s+/g, '').trim();
-        const visible = (element) => {
-          // Hidden duplicate chips can have the same text and geometry as the real option.
-          if (!element || element.closest('[aria-hidden="true"]')) return false;
-          const rect = element.getBoundingClientRect();
-          const style = getComputedStyle(element);
-          return rect.width > 0 && rect.height > 0 &&
-            style.display !== 'none' && style.visibility !== 'hidden';
-        };
-        const visibleMatches = (root, selector) =>
-          Array.from(root.querySelectorAll(selector)).filter(visible);
-        const authBlocked = () => /登录后查看搜索结果/.test(document.body?.innerText || '') ||
-          visible(document.querySelector('#login-btn'));
-        const locationBlocked = () => /请开启浏览器地理位置权限/.test(document.body?.innerText || '');
-        const panels = () => visibleMatches(document, '.search-layout__top > .filter > .filter-panel');
-        const triggers = () => visibleMatches(document, '.search-layout__top > .filter');
-
-        const openPanel = async () => {
-          let clicked = false;
-          for (let attempt = 0; attempt < 16; attempt++) {
-            if (authBlocked()) return { status: 'auth', detail: 'login_wall' };
-            const currentPanels = panels();
-            if (currentPanels.length === 1) return { status: 'ok', panel: currentPanels[0] };
-            if (currentPanels.length > 1) return { status: 'layout', detail: 'ambiguous_filter_panel' };
-            const currentTriggers = triggers();
-            if (currentTriggers.length > 1) return { status: 'layout', detail: 'ambiguous_filter_trigger' };
-            if (!clicked && currentTriggers.length === 1) {
-              currentTriggers[0].click();
-              clicked = true;
-            }
-            await sleep(100);
-          }
-          return { status: 'layout', detail: 'filter_panel_not_found' };
-        };
-
-        const findOption = (panel, request) => {
-          const groups = visibleMatches(panel, '.filters').filter((group) => {
-            const label = Array.from(group.children).find((child) => child.tagName === 'SPAN');
-            return text(label) === request.group;
-          });
-          if (groups.length !== 1) {
-            return { status: 'layout', detail: groups.length ? 'ambiguous_group' : 'group_not_found' };
-          }
-          const options = visibleMatches(groups[0], '.tag-container > .tags')
-            .filter((option) => text(option) === request.option);
-          if (options.length !== 1) {
-            return { status: 'layout', detail: options.length ? 'ambiguous_option' : 'option_not_found' };
-          }
-          return { status: 'ok', option: options[0] };
-        };
-        const isActive = (option) => option.classList.contains('active');
-        const ready = () => visibleMatches(document, 'section.note-item, section:has(a[href*="/search_result/"]), section:has(a[href*="/explore/"]), .search-empty-wrapper').length > 0;
-        const busy = () => visibleMatches(
-          document,
-          '.search-layout__main [aria-busy="true"], .search-layout__main [class*="skeleton"], .search-layout__main [class*="loading"]',
-        ).length > 0;
-        const snapshot = () => {
-          const rows = visibleMatches(document, 'section.note-item, section:has(a[href*="/search_result/"]), section:has(a[href*="/explore/"])')
-            .map((row) => {
-              const anchor = row.querySelector('a[href*="/search_result/"], a[href*="/explore/"]');
-              return [anchor?.getAttribute('href') || '', text(row)];
-            });
-          const feed = document.querySelector('.feeds-container');
-          return JSON.stringify([
-            rows,
-            visibleMatches(document, '.search-empty-wrapper').length,
-            document.documentElement?.scrollHeight || 0,
-            feed ? feed.clientHeight : null,
-          ]);
-        };
-
-        for (const request of requestedFilters) {
-          const opened = await openPanel();
-          if (opened.status !== 'ok') return opened;
-          let found = findOption(opened.panel, request);
-          if (found.status !== 'ok') {
-            if (request.capability === 'location') return { status: 'location', detail: found.detail };
-            if (request.capability === 'account') return { status: 'capability', detail: found.detail };
-            return found;
-          }
-          if (isActive(found.option)) {
-            continue;
-          }
-
-          const clickedAt = Date.now();
-          found.option.click();
-          let becameActive = false;
-          while (Date.now() - clickedAt < 2500) {
-            if (authBlocked()) return { status: 'auth', detail: 'login_wall' };
-            if (locationBlocked()) return { status: 'location', detail: 'geolocation_denied' };
-            const currentPanels = panels();
-            if (currentPanels.length === 1) {
-              found = findOption(currentPanels[0], request);
-              if (found.status === 'ok' && isActive(found.option)) {
-                becameActive = true;
-                break;
-              }
-            }
-            await sleep(100);
-          }
-          if (!becameActive) {
-            if (request.capability === 'location') return { status: 'location', detail: 'chip_not_active' };
-            if (request.capability === 'account') return { status: 'capability', detail: 'chip_not_active' };
-            return { status: 'inactive', detail: request.group + '/' + request.option };
-          }
-
-          let stableSamples = 0;
-          let previousSnapshot = '';
-          while (Date.now() - clickedAt < ${FILTER_SETTLE_SECONDS * 1000}) {
-            const currentSnapshot = snapshot();
-            if (Date.now() - clickedAt >= 1500 && ready() && !busy()) {
-              stableSamples = currentSnapshot === previousSnapshot ? stableSamples + 1 : 1;
-              previousSnapshot = currentSnapshot;
-              if (stableSamples >= 3) break;
-            }
-            else {
-              stableSamples = 0;
-              previousSnapshot = '';
-            }
-            await sleep(200);
-          }
-          if (stableSamples < 3) {
-            return { status: 'timeout', detail: request.group + '/' + request.option };
-          }
-          const finalPanels = panels();
-          const finalFound = finalPanels.length === 1 ? findOption(finalPanels[0], request) : null;
-          if (!finalFound || finalFound.status !== 'ok' || !isActive(finalFound.option)) {
-            return { status: 'inactive', detail: request.group + '/' + request.option };
-          }
-        }
-        return { status: 'ok' };
-      })()
-    `;
-}
-
-function requireFilterApplication(payload) {
-    const result = unwrapEvaluateResult(payload);
-    if (!result || typeof result !== 'object' || Array.isArray(result) || typeof result.status !== 'string') {
-        throw new CommandExecutionError('Unexpected Xiaohongshu search filter result shape.');
-    }
-    if (result.status === 'ok') {
-        return;
-    }
-    const detail = typeof result.detail === 'string' ? result.detail : 'unknown';
-    if (result.status === 'auth') {
-        throw new AuthRequiredError('www.xiaohongshu.com', 'Xiaohongshu search filters require a logged-in browser session');
-    }
-    if (result.status === 'timeout') {
-        throw new TimeoutError(`xiaohongshu search filter ${detail}`, FILTER_SETTLE_SECONDS);
-    }
-    if (result.status === 'location') {
-        throw new CommandExecutionError(`Xiaohongshu location filter was not applied (${detail}); enable browser geolocation permission.`);
-    }
-    if (result.status === 'capability') {
-        throw new CommandExecutionError(`Xiaohongshu account-scoped filter was unavailable (${detail}); verify login and account access.`);
-    }
-    if (result.status === 'inactive') {
-        throw new CommandExecutionError(`Xiaohongshu search filter chip did not become active (${detail}).`);
-    }
-    throw new CommandExecutionError(`Xiaohongshu search filter layout did not match the expected visible panel (${detail}).`);
 }
 /**
  * Build a "scroll until enough or plateaued" IIFE used in place of a fixed
@@ -621,248 +263,6 @@ export function buildSearchExtractJs(webHost) {
     `;
 }
 
-export function buildScrollHarvestJs(webHost, targetCount, options = {}) {
-    const maxRounds = options.maxRounds ?? 30;
-    const budgetMs = options.budgetMs ?? 30_000;
-    const step = options.step ?? DEFAULT_HARVEST_STEP;
-    if (!Number.isSafeInteger(targetCount) || targetCount < 1) {
-        throw new ArgumentError(`targetCount must be a positive integer, got ${JSON.stringify(targetCount)}`);
-    }
-    if (!Number.isSafeInteger(maxRounds) || maxRounds < 1) {
-        throw new ArgumentError(`maxRounds must be a positive integer, got ${JSON.stringify(maxRounds)}`);
-    }
-    if (!Number.isFinite(budgetMs) || budgetMs <= 0) {
-        throw new ArgumentError(`budgetMs must be a positive number, got ${JSON.stringify(budgetMs)}`);
-    }
-    if (!Number.isFinite(step) || step < 0) {
-        throw new ArgumentError(`step must be a non-negative number, got ${JSON.stringify(step)}`);
-    }
-    return `
-      (async () => {
-        const targetCount = ${targetCount};
-        const maxRounds = ${maxRounds};
-        const budgetMs = ${budgetMs};
-        const configuredStep = ${step};
-        const webHost = ${JSON.stringify(webHost)};
-        const noteUrlInfo = ${noteUrlInfo.toString()};
-        const mergeHarvestedRow = ${mergeHarvestedRow.toString()};
-        const stripXhsAuthorDateSuffix = ${stripXhsAuthorDateSuffix.toString()};
-        const extractSearchRows = ${extractSearchRows.toString()};
-        const usableRowCount = ${usableRowCount.toString()};
-        const shouldStopScrolling = ${shouldStopScrolling.toString()};
-        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-        const rootScroller = document.scrollingElement || document.documentElement || document.body;
-        const rootScrollHeight = () => Math.max(
-          rootScroller?.scrollHeight || 0,
-          document.documentElement?.scrollHeight || 0,
-          document.body?.scrollHeight || 0
-        );
-        const rootClientHeight = () => Math.max(
-          window.innerHeight || 0,
-          rootScroller?.clientHeight || 0,
-          document.documentElement?.clientHeight || 0
-        );
-        const readScrollMetrics = () => {
-          const rootTop = Math.max(
-            window.scrollY || window.pageYOffset || 0,
-            rootScroller?.scrollTop || 0,
-            document.documentElement?.scrollTop || 0,
-            document.body?.scrollTop || 0
-          );
-          return {
-            rootTop,
-            scrollTop: rootTop,
-            scrollHeight: rootScrollHeight(),
-            clientHeight: rootClientHeight(),
-          };
-        };
-        const driveScroll = (metrics) => {
-          // Never advance farther than one viewport. A larger step can skip a
-          // complete virtualized frame before it is harvested.
-          const viewport = metrics.clientHeight || configuredStep;
-          const scrollStep = Math.max(1, Math.min(configuredStep, viewport));
-          if (typeof window.scrollBy === 'function') {
-            window.scrollBy(0, scrollStep);
-          } else if (rootScroller) {
-            rootScroller.scrollTop += scrollStep;
-          }
-        };
-        const acc = new Map();
-        const startedAt = Date.now();
-        let previousMetrics = null;
-        let idleRounds = 0;
-        let cardCount = 0;
-        let round = 0;
-        let stopReason = '';
-        let metrics = readScrollMetrics();
-        let securityBlock = false;
-        while (true) {
-          round++;
-          securityBlock = /请求太频繁|访问频次异常|安全限制/.test(document.body?.innerText || '');
-          if (securityBlock) {
-            stopReason = 'security-block';
-            metrics = readScrollMetrics();
-            break;
-          }
-          const currentRows = extractSearchRows(webHost);
-          cardCount = currentRows.length;
-          let dataChanged = false;
-          for (const row of currentRows) {
-            if (mergeHarvestedRow(acc, row, webHost)) dataChanged = true;
-          }
-          metrics = readScrollMetrics();
-          const geometryChanged = previousMetrics === null ||
-            metrics.scrollTop !== previousMetrics.scrollTop ||
-            metrics.scrollHeight !== previousMetrics.scrollHeight ||
-            metrics.clientHeight !== previousMetrics.clientHeight;
-          const usable = usableRowCount(acc);
-          if (previousMetrics !== null && !dataChanged && !geometryChanged) {
-            idleRounds++;
-          } else {
-            idleRounds = 0;
-          }
-          const atBottom = metrics.scrollHeight <= metrics.clientHeight + 2 ||
-            metrics.scrollTop + metrics.clientHeight >= metrics.scrollHeight - 8;
-          const elapsedMs = Date.now() - startedAt;
-          const decision = shouldStopScrolling({
-            // Untitled cards are dropped after the loop, so counting them
-            // toward the target would silently shrink the result set.
-            collected: usable,
-            target: targetCount,
-            round,
-            maxRounds,
-            elapsedMs,
-            budgetMs,
-            atBottom,
-            idleRounds,
-          });
-          if (decision.stop) {
-            stopReason = decision.reason;
-            break;
-          }
-          previousMetrics = metrics;
-          driveScroll(metrics);
-          // At the bottom, give lazy loading a full second before counting an
-          // idle round. Mid-page frames need only a short render settle.
-          await wait(atBottom ? 1000 : 500);
-        }
-        const elapsedMs = Date.now() - startedAt;
-        const classMatches = document.querySelectorAll('section.note-item');
-        let diagnosticCards = classMatches;
-        if (classMatches.length === 0) {
-          const sections = new Set();
-          for (const anchor of document.querySelectorAll('a[href*="/search_result/"], a[href*="/explore/"]')) {
-            const section = anchor.closest('section');
-            if (section) sections.add(section);
-          }
-          diagnosticCards = sections;
-        }
-        const distinctCardTops = new Set();
-        for (const card of diagnosticCards) {
-          if (card.classList?.contains('query-note-item')) continue;
-          distinctCardTops.add(Math.round(card.getBoundingClientRect().top));
-        }
-        const feedContainer = document.querySelector('.feeds-container');
-        return {
-          rows: Array.from(acc.values()),
-          collected: acc.size,
-          diag: {
-            usable: usableRowCount(acc),
-            scrollTop: metrics.scrollTop,
-            scrollHeight: metrics.scrollHeight,
-            clientHeight: metrics.clientHeight,
-            cardCount,
-            feedClientHeight: feedContainer ? feedContainer.clientHeight : null,
-            distinctCardTops: distinctCardTops.size,
-            rounds: round,
-            stopReason,
-            elapsedMs,
-            securityBlock,
-          },
-        };
-      })()
-    `;
-}
-
-async function collectSearchHarvest(page, limit, requestedFilters) {
-    const waitResult = unwrapEvaluateResult(await page.evaluate(WAIT_FOR_CONTENT_JS));
-    if (waitResult === 'login_wall') {
-        throw new AuthRequiredError('www.xiaohongshu.com', 'Xiaohongshu search results are blocked behind a login wall');
-    }
-    if (waitResult === 'security_block') {
-        throw new CliError('SECURITY_BLOCK', 'Xiaohongshu search was blocked by request-frequency or security controls.', 'Wait before retrying or use a different logged-in browser session.');
-    }
-    if (waitResult === 'timeout') {
-        throw new TimeoutError('xiaohongshu search content', CONTENT_WAIT_SECONDS);
-    }
-    if (waitResult !== 'content') {
-        throw new CommandExecutionError('Unexpected Xiaohongshu search wait payload shape.');
-    }
-    requireFilterApplication(await page.evaluate(buildApplySearchFiltersJs(requestedFilters)));
-    const harvestOptions = harvestOptionsForLimit(limit);
-    const harvest = requireHarvestPayload(await page.evaluate(buildScrollHarvestJs('www.xiaohongshu.com', limit, harvestOptions)), 'www.xiaohongshu.com');
-    if (harvest.diag.securityBlock) {
-        throw new CliError('SECURITY_BLOCK', 'Xiaohongshu search was blocked by request-frequency or security controls.', 'Wait before retrying or use a different logged-in browser session.');
-    }
-    return harvest;
-}
-
-async function replaceCollapsedTab(page, url) {
-    if (typeof page.getActivePage !== 'function' || typeof page.newTab !== 'function' ||
-        typeof page.setActivePage !== 'function' || typeof page.selectTab !== 'function' ||
-        typeof page.closeTab !== 'function') {
-        throw new CommandExecutionError(
-            'Xiaohongshu search rendered in a collapsed tab, but this browser session cannot replace the failed target.',
-            'Retry the command in a Browser Bridge session that supports tab replacement.',
-        );
-    }
-    const previousPage = page.getActivePage();
-    if (!previousPage) {
-        throw new CommandExecutionError('Xiaohongshu search cannot identify the collapsed browser target for safe replacement.');
-    }
-    let freshPage;
-    try {
-        freshPage = await page.newTab(url);
-        if (!freshPage) {
-            throw new Error('newTab returned no page identity');
-        }
-        page.setActivePage(freshPage);
-        await page.closeTab(previousPage);
-    }
-    catch (error) {
-        const cleanupErrors = [];
-        if (freshPage) {
-            let restoredPrevious = false;
-            try {
-                await page.selectTab(previousPage);
-                restoredPrevious = true;
-            }
-            catch (cleanupError) {
-                cleanupErrors.push(cleanupError?.message ?? String(cleanupError));
-            }
-            if (restoredPrevious) {
-                try {
-                    await page.closeTab(freshPage);
-                }
-                catch (cleanupError) {
-                    cleanupErrors.push(cleanupError?.message ?? String(cleanupError));
-                }
-            }
-            else {
-                // If the old target disappeared despite the original error,
-                // keep the fresh preferred target bound for --keep-tab.
-                page.setActivePage(freshPage);
-            }
-        }
-        const cleanupContext = cleanupErrors.length > 0
-            ? ` Cleanup also failed: ${cleanupErrors.join('; ')}.`
-            : '';
-        throw new CommandExecutionError(
-            `Failed to replace collapsed Xiaohongshu search tab: ${error?.message ?? String(error)}.${cleanupContext}`,
-        );
-    }
-}
-
 export const command = cli({
     site: 'xiaohongshu',
     name: 'search',
@@ -870,7 +270,7 @@ export const command = cli({
     description: '搜索小红书笔记',
     domain: 'www.xiaohongshu.com',
     strategy: Strategy.COOKIE,
-    navigateBefore: false,
+    navigateBefore: false, siteSession: 'persistent',
     args: [
         { name: 'query', required: true, positional: true, help: 'Search keyword' },
         { name: 'limit', type: 'int', default: 20, help: 'Number of results' },
@@ -882,44 +282,44 @@ export const command = cli({
     ],
     columns: ['rank', 'title', 'author', 'likes', 'published_at', 'url'],
     func: async (page, kwargs) => {
-        try {
-            const limit = parseLimit(kwargs.limit);
-            const requestedFilters = resolveSearchFilters(kwargs);
-            const keyword = encodeURIComponent(kwargs.query);
-            const url = `https://www.xiaohongshu.com/search_result?keyword=${keyword}&source=web_search_result_notes`;
-            await page.goto(url);
-            let harvest = await collectSearchHarvest(page, limit, requestedFilters);
-            if (isCollapsedRender(harvest.diag)) {
-                await replaceCollapsedTab(page, url);
-                harvest = await collectSearchHarvest(page, limit, requestedFilters);
-                if (isCollapsedRender(harvest.diag)) {
-                    throw new CommandExecutionError(
-                        'Xiaohongshu search masonry remained collapsed after one fresh-tab recovery.',
-                        'Retry later or use a different logged-in browser session.',
-                    );
+        const limit = parseLimit(kwargs.limit);
+        const requested = resolveSearchFilters(kwargs);
+        const keyword = String(kwargs.query || '').trim();
+        if (!keyword) throw new ArgumentError('Search query must not be empty');
+        const available = await callWebApi(page, '/api/sns/web/v1/search/filter', { params: { keyword, searchId: '' } });
+        if (!Array.isArray(available.filters)) throw new CommandExecutionError('Xiaohongshu search omitted available filters');
+        const filters = requested.map((request) => {
+            const group = available.filters.find((filter) => filter.name === request.group);
+            const tag = group?.filterTags?.find((tag) => tag.name === request.option);
+            if (!group?.id || !tag?.id) throw new CommandExecutionError(`Xiaohongshu no longer offers filter ${request.group}: ${request.option}`);
+            return { type: group.id, tags: [tag.id] };
+        });
+        const rows = [];
+        const seen = new Set();
+        for (let number = 1; number <= 100; number++) {
+            const data = await callWebApi(page, '/api/sns/web/v2/search/notes', { method: 'POST', body: {
+                keyword, page: number, pageSize: 20, searchId: '', sort: 'general', noteType: 0,
+                extFlags: [], filters, geo: '', imageFormats: ['jpg', 'webp', 'avif'],
+            } });
+            if (!Array.isArray(data.items) || typeof data.hasMore !== 'boolean') throw new CommandExecutionError('Xiaohongshu search returned malformed pagination');
+            const before = rows.length;
+            for (const item of data.items) {
+                if (item?.modelType !== 'note') continue;
+                const card = item.noteCard;
+                if (!/^[a-f0-9]{24}$/i.test(item.id || '') || !item.xsecToken || !card?.user || !card.interactInfo) {
+                    throw new CommandExecutionError('Xiaohongshu search returned an incomplete note');
                 }
+                if (seen.has(item.id)) continue;
+                seen.add(item.id);
+                const url = new URL(`https://www.xiaohongshu.com/explore/${item.id}`);
+                url.search = new URLSearchParams({ xsec_token: item.xsecToken, xsec_source: 'pc_search' }).toString();
+                rows.push({ rank: rows.length + 1, title: card.displayTitle || '', author: card.user.nickname || card.user.nickName || '',
+                    likes: String(card.interactInfo.likedCount ?? 0), published_at: noteIdToDate(url.href), url: url.href });
+                if (rows.length === limit) return rows;
             }
-            const rows = harvest.rows
-                .filter((item) => item.title)
-                .slice(0, limit);
-            if (rows.length === 0) {
-                throw new EmptyResultError('xiaohongshu search', 'No usable notes were rendered for this query.');
-            }
-            return rows
-                .map((item, i) => ({
-                rank: i + 1,
-                ...item,
-                published_at: noteIdToDate(item.url),
-            }));
+            if (!data.hasMore) return rows;
+            if (rows.length === before) throw new CommandExecutionError('Xiaohongshu search repeated a page or returned no notes while advertising more');
         }
-        catch (err) {
-            if (err instanceof CliError)
-                throw err;
-            throw new CommandExecutionError(`Xiaohongshu search failed: ${err?.message ?? String(err)}`);
-        }
+        throw new CommandExecutionError('Xiaohongshu search reached its page limit before satisfying the requested limit');
     },
 });
-export const __test__ = {
-    harvestOptionsForLimit,
-    stripXhsAuthorDateSuffix,
-};

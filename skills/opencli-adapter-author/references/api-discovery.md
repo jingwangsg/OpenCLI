@@ -125,12 +125,12 @@ capture 会持久化到 `~/.opencli/cache/browser-network/<session>.json`（默�
 ```bash
 # 滚到底（虚拟列表）
 opencli browser eval "window.scrollTo(0, document.body.scrollHeight)"
-opencli browser wait time 2
+opencli browser wait selector "<newly-loaded-result-selector>"
 opencli browser network
 
 # 点某个按钮
 opencli browser click <N>
-opencli browser wait time 2
+opencli browser wait selector "<result-after-click-selector>"
 opencli browser network
 ```
 

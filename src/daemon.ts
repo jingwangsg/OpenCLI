@@ -389,6 +389,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       // commands are never arbitrated.
       let leaseKey: string | undefined;
       let leaseRunId: string | undefined;
+      // load-bearing: read before the type guard — in its else branch TS narrows `body` to never.
+      const requestRunId: unknown = body.runId;
+      const requestAccess: unknown = body.access;
       if (isSessionLeaseCommand(body)) {
         const now = Date.now();
         const key = getSessionLeaseKey(route.connection.contextId, body.surface, body.session);
@@ -417,6 +420,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         }
         leaseKey = key;
         leaseRunId = body.runId;
+      } else if (requestAccess === 'write' && typeof requestRunId === 'string') {
+        // A bound browser runtime can execute part of the same adapter write.
+        // Keep its original lease alive without creating a new browser-surface lease.
+        const holder = sessionLeases.list(Date.now(), runHasPendingWork).find((holder) => holder.runId === requestRunId);
+        if (holder) {
+          leaseKey = holder.key;
+          leaseRunId = holder.runId;
+        }
       }
 
       // Absolute deadline wins over the legacy duration field: all hops share

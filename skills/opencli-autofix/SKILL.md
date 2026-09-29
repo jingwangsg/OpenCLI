@@ -14,7 +14,6 @@ When an `opencli` command fails because a website changed its DOM, API, or respo
 
 - **`AUTH_REQUIRED`** (exit code 77) — **STOP.** Do not modify code. Tell the user to log into the site in Chrome.
 - **`BROWSER_CONNECT`** (exit code 69) — **STOP.** Do not modify code. Tell the user to run `opencli doctor`.
-- **CAPTCHA / rate limiting** — **STOP.** Not an adapter issue.
 
 **Scope constraint:**
 - **Only modify the file at `adapterSourcePath` in the trace `summary.md` front matter** — this is the authoritative adapter location (may be `clis/<site>/` in repo or `~/.opencli/clis/<site>/` for npm installs)
@@ -43,11 +42,13 @@ Use when `opencli <site> <command>` fails with repairable errors:
 `EMPTY_RESULT` — and sometimes a structurally-valid `SELECTOR` that returns nothing — is often **not an adapter bug**. Platforms actively degrade results under anti-scrape heuristics, and a "not found" response from the site doesn't mean the content is actually missing. Rule this out **before** committing to a repair round:
 
 - **Retry with an alternative query or entry point.** If `opencli xiaohongshu search "X"` returns 0 but `opencli xiaohongshu search "X 攻略"` returns 20, the adapter is fine — the platform was shaping results for the first query.
-- **Spot-check in a normal Chrome tab.** If the data is visible in the user's own browser but the adapter comes back empty, the issue is usually authentication state, rate limiting, or a soft block — not a code bug. The fix is `opencli doctor` / re-login, not editing source.
+- **Spot-check with `opencli browser` in the connected browser.** If a challenge or block appears, use the site's visible verification or navigation controls and inspect the resulting page. Only patch parsing code after the real results page is reachable and its structure differs from the adapter's expectation.
 - **Look for soft 404s.** Sites like xiaohongshu / weibo / douyin return HTTP 200 with an empty payload instead of a real 404 when an item is hidden or deleted. The snapshot will look structurally correct. A retry 2-3 seconds later often distinguishes "temporarily hidden" from "actually gone".
 - **"0 results" from a search is an answer.** If the adapter successfully reached the search endpoint, got an HTTP 200, and the platform returned `results: []`, that is a valid answer — report it to the user as "no matches for this query" rather than patching the adapter.
 
 Only proceed to Step 1 if the empty/selector-missing result is **reproducible across retries and alternative entry points**. Otherwise you're patching a working adapter to chase noise, and the patched version will break the next working path.
+
+For a blocked page, follow the [browser blocker SOP](references/browser-blockers.md) before deciding whether the adapter needs repair. A working homepage does not prove the blocked command path is usable.
 
 ## Step 1: Collect Trace Context
 
@@ -115,6 +116,7 @@ Read the trace summary and the adapter source. Classify the root cause:
 | EMPTY_RESULT | API response schema changed, or data moved | Check network → find new response path |
 | API_ERROR | Endpoint URL changed, new params required | Discover new API via network intercept |
 | AUTH_REQUIRED | Login flow changed, cookies expired | **STOP** — tell user to log in, do not modify code |
+| CAPTCHA / HTTP 403, 429, 432 / block page | Browser or site access gate | Follow [browser blocker SOP](references/browser-blockers.md); patch only if the real result page is reachable and the adapter still fails |
 | TIMEOUT | Page loads differently, spinner/lazy-load | Add/update wait conditions |
 | PAGE_CHANGED | Major redesign | May need full adapter rewrite |
 
@@ -210,7 +212,6 @@ If the retry **passes**, the local adapter has drifted from upstream. File a Git
 
 **Do NOT file for:**
 - `AUTH_REQUIRED`, `BROWSER_CONNECT`, `ARGUMENT`, `CONFIG` — environment/usage issues, not adapter bugs
-- CAPTCHA or rate limiting — not fixable upstream
 - Failures you couldn't actually fix (3 rounds exhausted)
 
 **Only file after a verified local fix** — the retry must pass first.
@@ -262,11 +263,10 @@ If `gh` is not installed or not authenticated, tell the user and skip — do not
 
 **Hard stops (do not modify code):**
 - **AUTH_REQUIRED / BROWSER_CONNECT** — environment issue, not adapter bug
-- **Site requires CAPTCHA** — can't automate this
-- **Rate limited / IP blocked** — not an adapter issue
 
 **Soft stops (report after attempting):**
 - **3 repair rounds exhausted** — stop, report what was tried and what failed
+- **Blocker SOP exhausted without a working result page** — report the exact response, attempted browser paths, and the condition needed to resume; do not turn the block into empty results
 - **Feature completely removed** — the data no longer exists
 - **Major redesign** — needs full adapter rewrite via `opencli-adapter-author` skill
 

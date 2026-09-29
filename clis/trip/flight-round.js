@@ -1,16 +1,13 @@
 /**
  * Trip.com (international) round-trip flight search by IATA route + dates.
  *
- * Complements one-way `flight`: the round-trip results page renders the same
- * `.result-item` outbound cards (priced for the round trip), so this reuses the
- * shared flight extractor and wait helper against a `triptype=rt` search URL.
- * Rows missing the airline, both airports, or both times are dropped.
+ * The API returns outbound legs priced for a round trip. Return legs are
+ * selected separately on the site.
  */
-import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
+import { ArgumentError, EmptyResultError } from '@jackwener/opencli/errors';
 import { cli, Strategy } from '@jackwener/opencli/registry';
+import { readTripFlights } from './flight-api.js';
 import {
-    WAIT_FOR_FLIGHTS_JS,
-    buildFlightExtractJs,
     buildFlightRoundSearchUrl,
     parseIataCode,
     parseIsoDate,
@@ -35,10 +32,11 @@ cli({
     ],
     columns: [
         'rank',
-        'airline',
+        'airline', 'flightNo',
         'departureTime', 'departureAirport',
         'arrivalTime', 'arrivalAirport',
-        'duration', 'stops',
+        'departureDateTime', 'arrivalDateTime',
+        'duration', 'stops', 'connections', 'layoversMinutes',
         'price', 'currency',
         'url',
     ],
@@ -56,37 +54,13 @@ cli({
         const limit = parseListLimit(kwargs.limit);
 
         const searchUrl = buildFlightRoundSearchUrl(fromCode, toCode, depart, ret);
-        await page.goto(searchUrl);
-        const waitResult = await page.evaluate(WAIT_FOR_FLIGHTS_JS);
-        if (waitResult === 'captcha') {
-            throw new AuthRequiredError('trip.com', 'Trip.com is asking for a verification; complete it in your browser session and retry');
-        }
-        if (waitResult !== 'content') {
-            throw new CommandExecutionError(`Trip.com flight page did not render flight cards (state=${String(waitResult)})`);
-        }
-        const raw = await page.evaluate(buildFlightExtractJs());
-        if (!Array.isArray(raw)) {
-            const reason = raw && typeof raw === 'object' && typeof raw.error === 'string'
-                && /^malformed flight card \d+: [a-z /]+$/.test(raw.error)
-                ? `: ${raw.error}`
-                : '';
-            throw new CommandExecutionError(`Trip.com flight DOM extraction returned malformed rows${reason}`);
-        }
-        if (raw.length === 0) {
+        const rows = await readTripFlights(page, searchUrl, { from: fromCode, to: toCode, depart, ret });
+        if (rows.length === 0) {
             throw new EmptyResultError('trip flight-round', `No round-trip flights for ${fromCode} to ${toCode} on ${depart} .. ${ret}`);
         }
-        return raw.slice(0, limit).map((r, i) => ({
+        return rows.slice(0, limit).map((r, i) => ({
             rank: i + 1,
-            airline: r.airline,
-            departureTime: r.departureTime,
-            departureAirport: r.departureAirport,
-            arrivalTime: r.arrivalTime,
-            arrivalAirport: r.arrivalAirport,
-            duration: r.duration,
-            stops: r.stops,
-            price: r.price,
-            currency: r.currency,
-            url: searchUrl,
+            ...r,
         }));
     },
 });

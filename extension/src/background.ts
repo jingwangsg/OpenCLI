@@ -1074,7 +1074,7 @@ async function findReusableOwnedContainerTab(windowId: number, ownedGroupId?: nu
 function initialTabIsAvailable(tabId: number | undefined): tabId is number {
   if (tabId === undefined) return false;
   for (const session of automationSessions.values()) {
-    if (session.owned && session.preferredTabId === tabId) return false;
+    if (session.preferredTabId === tabId) return false;
   }
   return true;
 }
@@ -2121,6 +2121,10 @@ async function handleWaitDownload(cmd: Command): Promise<Result> {
 }
 
 async function releaseLease(leaseKey: string, reason: string = 'released'): Promise<void> {
+  return withLeaseMutation(() => releaseLeaseUnlocked(leaseKey, reason));
+}
+
+async function releaseLeaseUnlocked(leaseKey: string, reason: string): Promise<void> {
   const session = automationSessions.get(leaseKey);
   if (!session) {
     sessionOverrides.delete(leaseKey);
@@ -2132,7 +2136,13 @@ async function releaseLease(leaseKey: string, reason: string = 'released'): Prom
   if (session.idleTimer) clearTimeout(session.idleTimer);
   scheduleIdleAlarm(leaseKey, IDLE_TIMEOUT_NONE);
 
-  if (session.owned) {
+  const sharedTab = session.preferredTabId !== null && [...automationSessions.entries()].some(([otherKey, other]) =>
+    otherKey !== leaseKey && other.preferredTabId === session.preferredTabId,
+  );
+  if (sharedTab) {
+    // A bound lease can outlive the owned lease that originally created this tab.
+    console.log(`[opencli] Retained tab ${session.preferredTabId} for another lease (${reason})`);
+  } else if (session.owned) {
     const tabId = session.preferredTabId;
     if (tabId !== null) {
       const hasOtherOwnedLease = [...automationSessions.entries()].some(([otherLease, otherSession]) =>
@@ -2193,6 +2203,7 @@ async function reconcileTargetLeaseRegistry(): Promise<void> {
   }
 
   automationSessions.clear();
+  const idleLeases: Array<[string, number]> = [];
   for (const [leaseKey, stored] of Object.entries(registry.leases)) {
     const tabId = stored.preferredTabId;
     if (tabId === null) continue;
@@ -2226,19 +2237,17 @@ async function reconcileTargetLeaseRegistry(): Promise<void> {
         }
       }
       const remaining = stored.idleDeadlineAt > 0 ? stored.idleDeadlineAt - Date.now() : timeout;
-      if (timeout > 0) {
-        if (remaining <= 0) {
-          await releaseLease(leaseKey, 'reconciled idle expiry');
-        } else {
-          // Honor the persisted remaining lifetime — not a fresh full timeout —
-          // so a lease cannot dodge idle expiry by riding repeated SW restarts.
-          resetWindowIdleTimer(leaseKey, remaining);
-        }
-      }
+      if (timeout > 0) idleLeases.push([leaseKey, remaining]);
     } catch {
       // Registry is semantic state, not truth. If Chrome no longer has the tab,
       // drop the lease record and never close unrelated user resources.
     }
+  }
+
+  // Restore all references before releasing expired owners of a still-bound tab.
+  for (const [leaseKey, remaining] of idleLeases) {
+    if (remaining <= 0) await releaseLease(leaseKey, 'reconciled idle expiry');
+    else resetWindowIdleTimer(leaseKey, remaining);
   }
 
   // Converge the interactive owned group on startup: adopt/title an orphan the
@@ -2256,10 +2265,11 @@ async function reconcileTargetLeaseRegistry(): Promise<void> {
 }
 
 async function handleBind(cmd: Command, leaseKey: string): Promise<Result> {
+  return withLeaseMutation(() => bindLease(cmd, leaseKey));
+}
+
+async function bindLease(cmd: Command, leaseKey: string): Promise<Result> {
   const existing = automationSessions.get(leaseKey);
-  if (existing?.owned) {
-    await releaseLease(leaseKey, 'rebind');
-  }
   const activeTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   const fallbackTabs = await chrome.tabs.query({ lastFocusedWindow: true });
   const boundTab = activeTabs.find((tab) => isDebuggableUrl(tab.url))
@@ -2273,6 +2283,8 @@ async function handleBind(cmd: Command, leaseKey: string): Promise<Result> {
       errorHint: 'Focus the target Chrome tab/window, then retry bind.',
     };
   }
+
+  if (existing?.owned && existing.preferredTabId !== boundTab.id) await releaseLeaseUnlocked(leaseKey, 'rebind');
 
   const current = automationSessions.get(leaseKey);
   if (current && !current.owned && current.preferredTabId !== null && current.preferredTabId !== boundTab.id) {

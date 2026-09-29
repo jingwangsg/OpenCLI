@@ -12,10 +12,10 @@ the same company. These commands search worldwide flights and hotels on
 | Command | Mode | Description |
 |---------|------|-------------|
 | `opencli trip search` | Public | Suggest destinations (cities + airports) for a keyword, resolving the ids other commands take |
-| `opencli trip flight` | Browser (cookie) | One-way flight search by IATA route + departure date |
-| `opencli trip flight-round` | Browser (cookie) | Round-trip flight search by IATA route + depart/return dates |
-| `opencli trip hotel-search` | Browser (cookie) | List hotels for a city id + check-in/out date range |
-| `opencli trip hotel` | Browser (cookie) | Single-hotel detail by id: rating breakdown, amenities, check-in/out policy |
+| `opencli trip flight` | Browser-signed API | One-way flight search by IATA route + departure date |
+| `opencli trip flight-round` | Browser-signed API | Round-trip outbound options by IATA route + depart/return dates |
+| `opencli trip hotel-search` | Cookie API | List hotels for a city id + check-in/out date range |
+| `opencli trip hotel` | Cookie API | Single-hotel detail by id: rating breakdown, amenities, check-in/out policy |
 | `opencli trip attraction` | Browser (cookie) | Attractions and experiences (tickets + tours) search by destination keyword |
 | `opencli trip train` | Browser (cookie) | Train route timetable (departure/arrival times, duration, changes) |
 | `opencli trip car` | Browser (cookie) | Car-rental listing for a city (category, model, seats, daily price) |
@@ -91,32 +91,39 @@ keep `cityId` / `airportCode` as `null` rather than a sentinel.
 
 | Column | Notes |
 |--------|-------|
-| `rank` | 1-based position after filtering incomplete rows |
-| `airline` | Operating airline name |
-| `departureTime`, `arrivalTime` | Local `H:MM AM/PM` strings as rendered |
+| `rank` | 1-based position sorted by the lowest available policy price |
+| `airline`, `flightNo` | Airline name and all outbound flight numbers in travel order |
+| `departureTime`, `arrivalTime` | Airport-local `HH:MM` |
 | `departureAirport`, `arrivalAirport` | 3-letter IATA airport codes |
-| `duration` | Trip length as shown (e.g. `7h 50m`); `null` if absent |
-| `stops` | Stop summary (e.g. `Nonstop`, `1 stop`); `null` if absent |
-| `price` | Lowest fare shown as a number; `null` if non-numeric |
+| `departureDateTime`, `arrivalDateTime` | Airport-local dates and times; preserve overnight arrivals |
+| `duration`, `stops` | Total itinerary duration and connection count |
+| `connections`, `layoversMinutes` | Ordered comma-separated connection cities and minutes; empty for nonstop flights |
+| `price` | Lowest available policy total, including taxes, as a number |
 | `currency` | `USD` (the search pins `curr=USD`) |
-| `url` | The search URL (Trip.com flight cards share a booking handoff, no per-row deeplink) |
+| `url` | The date-specific search URL |
 
 Args:
 - `<from>`, `<to>` (positional, required): 3-letter IATA codes (`LON`/`NYC` metro codes work alongside single-airport codes like `LHR`/`JFK`).
 - `--date` (required): `YYYY-MM-DD`.
 - `--limit` (1-50, default 20).
 
-Rows come from `.result-item` cards, read by stable `data-testid` anchors
-(`flights-name`, `stopInfoText`, `flight_price_*`) plus the `HH:MM` / `AM-PM` /
-IATA leaf pattern, rather than positional innerText. Cards missing the airline,
-both airports, or both times are dropped rather than emitted with sentinel values.
+The signed-in page creates the route-specific `FlightListSearchSSE` request. The
+adapter waits for that request event, then replays it from Node with its real headers,
+body and current browser cookies. Rows come from the complete API itinerary
+list; the page may render only a small subset. The adapter checks route, date,
+response count and required flight fields before returning rows. The site binds
+an opaque header to the request body, so a new route/date requires a new page
+request rather than editing a captured body.
 
 ## Round-Trip Flight Columns (`flight-round`)
 
-`flight-round` returns the outbound leg of a round-trip search (priced for the
-round trip) with the same column shape as `flight` (`rank`, `airline`,
-`departureTime`, `departureAirport`, `arrivalTime`, `arrivalAirport`, `duration`,
-`stops`, `price`, `currency`, `url`) and reuses the same `.result-item` extractor.
+`flight-round` returns outbound legs with the round-trip search's quoted total.
+It uses the same API fields as `flight`; the return leg must still be selected
+and checked before comparing an exact round-trip itinerary across sites.
+Its search URL follows the Trip.com homepage flight form on `us.trip.com` with
+`locale=en-US`; the older `www.trip.com` deep link can return a WhaleGuard 432
+block page. Use a fixed connected `--profile` and `--site-session persistent`
+when reusing a completed login or verification.
 
 Args:
 - `<from>`, `<to>` (positional, required): 3-letter IATA codes.
@@ -127,23 +134,31 @@ Args:
 
 | Column | Notes |
 |--------|-------|
-| `rank` | 1-based position in the rendered list |
+| `rank` | 1-based position in the API listing |
+| `hotelId` | Trip.com hotel id for matching the same property across searches |
 | `name` | Hotel name |
 | `score`, `reviewLabel` | Guest score (out of 10) and its label (e.g. `Very good`); `null` if unrated |
 | `reviews` | Review count as an integer; `null` if absent |
 | `location` | Location / landmark descriptions joined by `, ` |
-| `room` | Lead room name shown on the card; `null` if absent |
-| `price`, `currency` | Nightly price and `USD`; `price` is `null` when non-numeric |
-| `url` | The search results URL (cards share the list page) |
+| `room` | Lead room name from the listing API; `null` if absent |
+| `price`, `currency` | Displayed nightly price and currency for the lead room |
+| `totalPrice`, `totalPriceLabel` | Displayed whole-stay price and payment label when the API supplies them; this is a listing quote |
+| `url` | The date-specific search results URL |
 
 Args:
 - `<city>` (positional, required): numeric Trip.com city id (discover via the hotels search box; e.g. `338` for London).
 - `--checkin`, `--checkout` (required): `YYYY-MM-DD`, validated as real calendar dates with `checkin < checkout`.
-- `--limit` (1-50, default 20).
+- `--limit` (1-50, default 20): the command requests additional API pages as needed.
 
-Rows come from `.hotel-card` cards, read by stable class-keyed fields
-(`.hotelName` / `.score` / `.comment-num` / `.position-desc` / `.price-highlight`).
-Cards without a hotel name are dropped rather than surfaced with blanks.
+The command sends the city, dates, and the site's standard one-room/two-adult
+search parameters directly to `fetchHotelList` with the profile's current cookies.
+It does not load a results page or read DOM/SSR data. It increments the API page
+index until it has enough unique hotels or the API returns an empty page; repeated
+pages and pagination-cap exhaustion report errors instead of partial results. It validates
+input city/dates, returned page indexes and hotel identities. `fetchDynamicRefreshList` is only a
+partial price refresh and is not used as the full listing source. Compare
+`totalPrice` only for the same occupancy, room and payment terms; additional
+property charges may still appear later in the booking flow.
 
 ## Hotel Detail Columns (`hotel`)
 
@@ -164,10 +179,7 @@ Cards without a hotel name are dropped rather than surfaced with blanks.
 Args:
 - `<id>` (positional, required): numeric Trip.com hotel id (discover via the hotels list; e.g. `715233`).
 
-The profile is read from `__NEXT_DATA__.props.pageProps.hotelDetailResponse` (the
-same SSR shape the mainland `ctrip hotel` detail uses), surfacing the fields the
-listing row does not carry. Room-level nightly prices load via a post-SSR XHR and
-are out of scope here.
+The command calls `www.trip.com/restapi/soa2/33269/getHotelDetailAggregate` directly with profile cookies. It verifies the returned hotel id before mapping metadata and does not navigate to or parse the hotel page. The API requires the current +08 calendar day and following day to include check-in/out policies; these are site-default metadata dates, not a room-price quote. `hotel-search` provides dated listing prices.
 
 ## Attraction Columns (`attraction`)
 

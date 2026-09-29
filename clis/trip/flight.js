@@ -1,16 +1,13 @@
 /**
  * Trip.com (international) one-way flight search by IATA route + date.
  *
- * Trip.com is the English-facing sibling of Ctrip. Results render client-side
- * into `.result-item` cards keyed by stable `data-testid` anchors, so this
- * reads by selector (see `buildFlightExtractJs` in utils) rather than by
- * position. Rows missing the airline, both airports, or both times are dropped.
+ * Reads the full signed flight-search API result using the current browser
+ * profile's cookies and the page-generated request headers.
  */
-import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
+import { ArgumentError, EmptyResultError } from '@jackwener/opencli/errors';
 import { cli, Strategy } from '@jackwener/opencli/registry';
+import { readTripFlights } from './flight-api.js';
 import {
-    WAIT_FOR_FLIGHTS_JS,
-    buildFlightExtractJs,
     buildFlightSearchUrl,
     parseIataCode,
     parseIsoDate,
@@ -34,10 +31,11 @@ cli({
     ],
     columns: [
         'rank',
-        'airline',
+        'airline', 'flightNo',
         'departureTime', 'departureAirport',
         'arrivalTime', 'arrivalAirport',
-        'duration', 'stops',
+        'departureDateTime', 'arrivalDateTime',
+        'duration', 'stops', 'connections', 'layoversMinutes',
         'price', 'currency',
         'url',
     ],
@@ -51,37 +49,13 @@ cli({
         const limit = parseListLimit(kwargs.limit);
 
         const searchUrl = buildFlightSearchUrl(fromCode, toCode, date);
-        await page.goto(searchUrl);
-        const waitResult = await page.evaluate(WAIT_FOR_FLIGHTS_JS);
-        if (waitResult === 'captcha') {
-            throw new AuthRequiredError('trip.com', 'Trip.com is asking for a verification; complete it in your browser session and retry');
-        }
-        if (waitResult !== 'content') {
-            throw new CommandExecutionError(`Trip.com flight page did not render flight cards (state=${String(waitResult)})`);
-        }
-        const raw = await page.evaluate(buildFlightExtractJs());
-        if (!Array.isArray(raw)) {
-            const reason = raw && typeof raw === 'object' && typeof raw.error === 'string'
-                && /^malformed flight card \d+: [a-z /]+$/.test(raw.error)
-                ? `: ${raw.error}`
-                : '';
-            throw new CommandExecutionError(`Trip.com flight DOM extraction returned malformed rows${reason}`);
-        }
-        if (raw.length === 0) {
+        const rows = await readTripFlights(page, searchUrl, { from: fromCode, to: toCode, depart: date });
+        if (rows.length === 0) {
             throw new EmptyResultError('trip flight', `No flights for ${fromCode} to ${toCode} on ${date}`);
         }
-        return raw.slice(0, limit).map((r, i) => ({
+        return rows.slice(0, limit).map((r, i) => ({
             rank: i + 1,
-            airline: r.airline,
-            departureTime: r.departureTime,
-            departureAirport: r.departureAirport,
-            arrivalTime: r.arrivalTime,
-            arrivalAirport: r.arrivalAirport,
-            duration: r.duration,
-            stops: r.stops,
-            price: r.price,
-            currency: r.currency,
-            url: searchUrl,
+            ...r,
         }));
     },
 });

@@ -93,6 +93,15 @@ describe('Page.evaluate', () => {
     expect(sendCommandMock).toHaveBeenCalledTimes(2);
   });
 
+  it('does not replay evaluateOnce after an operation loses its navigation context', async () => {
+    sendCommandMock.mockRejectedValue(new Error('{"code":-32000,"message":"Inspected target navigated or closed"}'));
+    const page = new Page('site:xiaohongshu', undefined, 'selected-profile', undefined, 'adapter', 'persistent');
+    await expect(page.evaluateOnce((id: string) => fetch('/write', { method: 'POST', body: id }), 'target-id'))
+      .rejects.toThrow('Inspected target navigated');
+    expect(sendCommandMock).toHaveBeenCalledTimes(1);
+    expect(sendCommandMock).toHaveBeenCalledWith('exec', expect.objectContaining({ contextId: 'selected-profile', siteSession: 'persistent' }));
+  });
+
   it('serializes function-form evaluate calls with JSON args', async () => {
     sendCommandMock.mockResolvedValueOnce('/opencli');
 

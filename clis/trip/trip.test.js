@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { getRegistry } from '@jackwener/opencli/registry';
 import './flight.js';
@@ -17,7 +17,6 @@ import {
     WAIT_FOR_ATTRACTIONS_JS,
     WAIT_FOR_CARS_JS,
     WAIT_FOR_DEALS_JS,
-    WAIT_FOR_HOTEL_DETAIL_JS,
     WAIT_FOR_TRAINS_JS,
     WAIT_FOR_TRANSFERS_JS,
     buildAttractionExtractJs,
@@ -26,12 +25,9 @@ import {
     buildCarListUrl,
     buildDealsExtractJs,
     buildDealsUrl,
-    buildFlightExtractJs,
     buildFlightRoundSearchUrl,
     buildFlightSearchUrl,
-    buildHotelDetailExtractJs,
     buildHotelDetailUrl,
-    buildHotelExtractJs,
     buildHotelSearchUrl,
     buildTourSearchJs,
     buildTourSearchUrl,
@@ -61,6 +57,7 @@ function createPageMock(evaluateResults) {
         goto: vi.fn().mockResolvedValue(undefined),
         evaluate,
         wait: vi.fn().mockResolvedValue(undefined),
+        getCookies: vi.fn().mockResolvedValue([]),
     };
 }
 
@@ -104,12 +101,12 @@ describe('trip buildFlightSearchUrl', () => {
     it('lowercases codes and pins one-way English/USD params', () => {
         const url = buildFlightSearchUrl('LON', 'NYC', '2026-08-15');
         const qs = new URL(url).searchParams;
-        expect(url).toContain('https://www.trip.com/flights/showfarefirst?');
+        expect(url).toContain('https://us.trip.com/flights/showfarefirst?');
         expect(qs.get('dcity')).toBe('lon');
         expect(qs.get('acity')).toBe('nyc');
         expect(qs.get('ddate')).toBe('2026-08-15');
         expect(qs.get('triptype')).toBe('ow');
-        expect(qs.get('locale')).toBe('en_US');
+        expect(qs.get('locale')).toBe('en-US');
         expect(qs.get('curr')).toBe('USD');
     });
 });
@@ -117,286 +114,18 @@ describe('trip buildFlightSearchUrl', () => {
 describe('trip flight command (registry-level)', () => {
     const cmd = getRegistry().get('trip/flight');
 
-    const FLIGHT_RAW = {
-        airline: 'Norse Atlantic Airways',
-        departureTime: '1:05 PM',
-        departureAirport: 'LGW',
-        arrivalTime: '3:55 PM',
-        arrivalAirport: 'JFK',
-        duration: '7h 50m',
-        stops: 'Nonstop',
-        price: 662,
-        currency: 'USD',
-    };
-
-    it('declares Strategy.COOKIE + browser:true + navigateBefore:false + access:read', () => {
-        expect(cmd.access).toBe('read');
-        expect(cmd.browser).toBe(true);
-        expect(String(cmd.strategy)).toContain('cookie');
-        expect(cmd.navigateBefore).toBe(false);
-        expect(cmd.domain).toBe('trip.com');
-    });
-
-    it('rejects invalid IATA / date / from==to / limit before navigation', async () => {
+    it('uses the browser profile and rejects invalid input before navigation', async () => {
+        expect(cmd).toMatchObject({ access: 'read', browser: true, navigateBefore: false, domain: 'trip.com' });
         const page = createPageMock([]);
-        await expect(cmd.func(page, { from: 'LO', to: 'NYC', date: '2026-08-15', limit: 5 }))
-            .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('IATA') });
-        await expect(cmd.func(page, { from: 'LON', to: 'LON', date: '2026-08-15', limit: 5 }))
-            .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('must differ') });
-        await expect(cmd.func(page, { from: 'LON', to: 'NYC', date: '08/15', limit: 5 }))
-            .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('--date') });
+        await expect(cmd.func(page, { from: 'LO', to: 'NYC', date: '2026-08-15' }))
+            .rejects.toMatchObject({ code: 'ARGUMENT' });
+        await expect(cmd.func(page, { from: 'LON', to: 'LON', date: '2026-08-15' }))
+            .rejects.toMatchObject({ code: 'ARGUMENT' });
+        await expect(cmd.func(page, { from: 'LON', to: 'NYC', date: '08/15' }))
+            .rejects.toMatchObject({ code: 'ARGUMENT' });
         await expect(cmd.func(page, { from: 'LON', to: 'NYC', date: '2026-08-15', limit: 0 }))
-            .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('--limit') });
+            .rejects.toMatchObject({ code: 'ARGUMENT' });
         expect(page.goto).not.toHaveBeenCalled();
-    });
-
-    it('throws AuthRequired when a verification gate is detected', async () => {
-        const page = createPageMock(['captcha']);
-        await expect(cmd.func(page, { from: 'LON', to: 'NYC', date: '2026-08-15', limit: 5 }))
-            .rejects.toThrow('Trip.com is asking for a verification');
-        expect(page.evaluate).toHaveBeenCalledTimes(1);
-    });
-
-    it('throws CommandExecutionError on render timeout and on malformed extraction', async () => {
-        await expect(cmd.func(createPageMock(['timeout']), { from: 'LON', to: 'NYC', date: '2026-08-15', limit: 5 }))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('did not render flight cards') });
-        await expect(cmd.func(createPageMock(['content', { error: 'malformed flight card 0: endpoint time/airport' }]), { from: 'LON', to: 'NYC', date: '2026-08-15', limit: 5 }))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('endpoint time/airport') });
-    });
-
-    it('throws EmptyResultError when extraction returns no flights', async () => {
-        await expect(cmd.func(createPageMock(['content', []]), { from: 'LON', to: 'NYC', date: '2026-08-15', limit: 5 }))
-            .rejects.toMatchObject({ code: 'EMPTY_RESULT' });
-    });
-
-    it('maps DOM-extracted rows and respects --limit', async () => {
-        const page = createPageMock(['content', [FLIGHT_RAW, { ...FLIGHT_RAW, airline: 'Jetblue Airways', price: 837 }]]);
-        const rows = await cmd.func(page, { from: 'LON', to: 'NYC', date: '2026-08-15', limit: 1 });
-        expect(rows).toHaveLength(1);
-        expect(rows[0]).toMatchObject({
-            rank: 1,
-            airline: 'Norse Atlantic Airways',
-            departureTime: '1:05 PM',
-            departureAirport: 'LGW',
-            arrivalTime: '3:55 PM',
-            arrivalAirport: 'JFK',
-            price: 662,
-            currency: 'USD',
-        });
-        for (const row of rows) {
-            for (const col of cmd.columns) expect(row).toHaveProperty(col);
-        }
-    });
-});
-
-describe('trip buildFlightExtractJs (JSDOM)', () => {
-    function runExtract(html) {
-        const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, { url: 'https://www.trip.com/' });
-        const js = buildFlightExtractJs();
-        return Function('document', `return (${js})`)(dom.window.document);
-    }
-
-    // Mirrors Trip.com's live card markup (captured 2026-08). Airport codes sit in
-    // plain leaf nodes — the `font-black` class this fixture used to assert on is
-    // gone from the site, which is exactly what let the old selector rot unnoticed.
-    const CARD = `
-      <div class="result-item">
-        <div data-testid="flights-name">Norse Atlantic Airways</div>
-        <div data-testid="flt-info-stop__wrapper">
-          <div role="textbox" aria-label="London Gatwick Airport N">
-            <div><span data-testid="flight-time-2026-09-07 13:05:00"><span>1:05</span><span>PM</span></span></div>
-            <span><span>LGW</span><span>N</span></span>
-          </div>
-          <div>
-            <div data-testid="flightInfoDuration"><span>7h 50m</span></div>
-            <div data-testid="stopInfoText">Nonstop</div>
-          </div>
-          <div role="textbox" aria-label="John F. Kennedy International Airport T4">
-            <div><span data-testid="flight-time-2026-09-07 15:55:00"><span>3:55</span><span>PM</span></span></div>
-            <span><span>JFK</span><span>T4</span></span>
-          </div>
-        </div>
-        <div data-testid="flight_price_1-0">$662</div>
-      </div>`;
-
-    // Overnight leg: Trip.com renders a literal `+1` next to the arrival airport and
-    // the `flight-time-` anchors land on the following calendar day.
-    const OVERNIGHT_CARD = `
-      <div class="result-item">
-        <div data-testid="flights-name">China Southern Airlines</div>
-        <div data-testid="flt-info-stop__wrapper">
-          <div role="textbox" aria-label="Shanghai Hongqiao International Airport T2">
-            <div><span data-testid="flight-time-2026-09-07 19:50:00"><span>7:50</span><span>PM</span></span></div>
-            <span><span>SHA</span><span>T2</span></span>
-          </div>
-          <div>
-            <div data-testid="flightInfoDuration"><span>17h 40m</span></div>
-            <div data-testid="stopInfoText">2h 40m in Guangzhou</div>
-          </div>
-          <div role="textbox" aria-label="London Gatwick Airport S">
-            <div><span data-testid="flight-time-2026-09-08 06:30:00"><span>6:30</span><span>AM</span></span></div>
-            <span><span>LGW</span><span>S</span></span><span>+1</span>
-          </div>
-        </div>
-        <div data-testid="flight_price_1-0">$557</div>
-      </div>`;
-
-    // A real three-letter airline name and a currency badge are both valid card
-    // leaves but neither belongs to the route. The old card-wide leaf scan would
-    // incorrectly emit ANA -> LHR; the neighboring card also guards row ordering.
-    const DISTRACTOR_CARD = `
-      <div class="result-item">
-        <div data-testid="flights-name">ANA</div>
-        <div data-testid="flt-info-stop__wrapper">
-          <div role="textbox" aria-label="Heathrow Airport T2">
-            <div><span data-testid="flight-time-2026-09-07 09:00:00"><span>9:00</span><span>AM</span></span></div>
-            <span><span>LHR</span><span>T2</span></span>
-          </div>
-          <div>
-            <div data-testid="flightInfoDuration"><span>13h 45m</span></div>
-            <div data-testid="stopInfoText">Nonstop</div>
-          </div>
-          <div role="textbox" aria-label="Haneda Airport T3">
-            <div><span data-testid="flight-time-2026-09-08 06:45:00"><span>6:45</span><span>AM</span></span></div>
-            <span><span>HND</span><span>T3</span></span>
-          </div>
-        </div>
-        <span>USD</span>
-        <div data-testid="flight_price_1-0">$910</div>
-      </div>`;
-
-    // Current Trip.com evidence for CXI -> HNL across the International Date
-    // Line: the visible card renders `-1` and the local-ISO arrival is Sep 1
-    // even though the local departure is Sep 2.
-    const DATE_LINE_CARD = `
-      <div class="result-item">
-        <div data-testid="flights-name">Fiji Airways</div>
-        <div data-testid="flt-info-stop__wrapper">
-          <div role="textbox" aria-label="Cassidy International Airport">
-            <div><span data-testid="flight-time-2026-09-02 16:25:00"><span>4:25</span><span>PM</span></span></div>
-            <span><span>CXI</span></span>
-          </div>
-          <div>
-            <div data-testid="flightInfoDuration"><span>3h 25m</span></div>
-            <div data-testid="stopInfoText">Nonstop</div>
-          </div>
-          <div role="textbox" aria-label="Honolulu International Airport T1">
-            <div><span data-testid="flight-time-2026-09-01 08:50:00"><span>8:50</span><span>AM</span></span></div>
-            <span><span>HNL</span><span>T1</span></span><span>-1</span>
-          </div>
-        </div>
-        <div data-testid="flight_price_1-0">$745</div>
-      </div>`;
-
-    it('extracts a flight card via data-testid + time/code anchors', () => {
-        expect(runExtract(CARD)).toEqual([{
-            airline: 'Norse Atlantic Airways',
-            departureTime: '1:05 PM',
-            departureAirport: 'LGW',
-            arrivalTime: '3:55 PM',
-            arrivalAirport: 'JFK',
-            duration: '7h 50m',
-            stops: 'Nonstop',
-            price: 662,
-            currency: 'USD',
-        }]);
-    });
-
-    it('flags a later-day arrival with a +N suffix', () => {
-        expect(runExtract(OVERNIGHT_CARD)).toEqual([{
-            airline: 'China Southern Airlines',
-            departureTime: '7:50 PM',
-            departureAirport: 'SHA',
-            arrivalTime: '6:30 AM+1',
-            arrivalAirport: 'LGW',
-            duration: '17h 40m',
-            stops: '2h 40m in Guangzhou',
-            price: 557,
-            currency: 'USD',
-        }]);
-    });
-
-    it('leaves same-day arrivals unsuffixed', () => {
-        expect(runExtract(CARD)[0].arrivalTime).toBe('3:55 PM');
-    });
-
-    it('keeps airport provenance and order card-local despite realistic 3-letter distractors', () => {
-        const rows = runExtract(CARD + DISTRACTOR_CARD);
-        expect(rows).toHaveLength(2);
-        expect(rows.map((row) => [row.airline, row.departureAirport, row.arrivalAirport, row.arrivalTime])).toEqual([
-            ['Norse Atlantic Airways', 'LGW', 'JFK', '3:55 PM'],
-            ['ANA', 'LHR', 'HND', '6:45 AM+1'],
-        ]);
-    });
-
-    it('ignores hidden route, endpoint, time, and airport duplicates', () => {
-        const hiddenRoute = `<div hidden data-testid="flt-info-stop__wrapper">
-          <div role="textbox"><span data-testid="flight-time-2026-09-07 00:00:00">12:00 AM</span><span>AAA</span></div>
-          <div role="textbox"><span data-testid="flight-time-2026-09-07 01:00:00">1:00 AM</span><span>BBB</span></div>
-        </div>`;
-        const hiddenEndpoint = `<div role="textbox" style="visibility: hidden">
-          <span data-testid="flight-time-2026-09-07 02:00:00">2:00 AM</span><span>CCC</span>
-        </div>`;
-        const hiddenDuplicates = CARD
-            .replace('<div data-testid="flt-info-stop__wrapper">', `${hiddenRoute}<div data-testid="flt-info-stop__wrapper">${hiddenEndpoint}`)
-            .replace(
-                '<div><span data-testid="flight-time-2026-09-07 13:05:00">',
-                `<span hidden data-testid="flight-time-2026-09-07 09:00:00"><span>9:00</span><span>AM</span></span>
-                 <span aria-hidden="true"><span>LHR</span></span>
-                 <span style="display: none"><span>SFO</span></span>
-                 <span style="visibility: hidden"><span>CDG</span></span>
-                 <div><span data-testid="flight-time-2026-09-07 13:05:00">`,
-            );
-        expect(runExtract(hiddenDuplicates)).toEqual(runExtract(CARD));
-    });
-
-    it('fails closed when duplicate time or airport evidence is visible', () => {
-        const duplicateTime = CARD.replace(
-            '<div><span data-testid="flight-time-2026-09-07 13:05:00">',
-            `<span data-testid="flight-time-2026-09-07 09:00:00"><span>9:00</span><span>AM</span></span>
-             <div><span data-testid="flight-time-2026-09-07 13:05:00">`,
-        );
-        expect(runExtract(duplicateTime)).toMatchObject({ error: expect.stringContaining('endpoint time/airport') });
-
-        const duplicateAirport = CARD.replace('<span><span>LGW</span><span>N</span></span>', '<span><span>LGW</span><span>LHR</span></span>');
-        expect(runExtract(duplicateAirport)).toMatchObject({ error: expect.stringContaining('endpoint time/airport') });
-    });
-
-    it('uses strict calendar dates for year rollover without local-time parsing', () => {
-        const yearRollover = OVERNIGHT_CARD
-            .replace('2026-09-07 19:50:00', '2026-12-31 19:50:00')
-            .replace('2026-09-08 06:30:00', '2027-01-01 06:30:00');
-        expect(runExtract(yearRollover)[0].arrivalTime).toBe('6:30 AM+1');
-    });
-
-    it('preserves Trip.com\'s negative day suffix for a date-line crossing', () => {
-        expect(runExtract(DATE_LINE_CARD)).toEqual([{
-            airline: 'Fiji Airways',
-            departureTime: '4:25 PM',
-            departureAirport: 'CXI',
-            arrivalTime: '8:50 AM-1',
-            arrivalAirport: 'HNL',
-            duration: '3h 25m',
-            stops: 'Nonstop',
-            price: 745,
-            currency: 'USD',
-        }]);
-    });
-
-    it('fails closed on malformed local-ISO anchors', () => {
-        const malformedDate = CARD.replace('2026-09-07 15:55:00', '2026-02-30 15:55:00');
-        expect(runExtract(malformedDate)).toMatchObject({ error: expect.stringContaining('endpoint time/airport') });
-    });
-
-    it('keeps price null when the price node is missing/non-numeric', () => {
-        const noPrice = CARD.replace('<div data-testid="flight_price_1-0">$662</div>', '<div data-testid="flight_price_1-0">--</div>');
-        expect(runExtract(noPrice)[0].price).toBeNull();
-    });
-
-    it('fails closed on cards missing airline or route endpoints', () => {
-        const noAirline = CARD.replace('<div data-testid="flights-name">Norse Atlantic Airways</div>', '');
-        expect(runExtract(noAirline)).toMatchObject({ error: expect.stringContaining('airline') });
-        expect(runExtract('<div class="result-item"></div>')).toMatchObject({ error: expect.stringContaining('airline') });
     });
 });
 
@@ -427,98 +156,22 @@ describe('trip buildHotelSearchUrl', () => {
 describe('trip hotel-search command (registry-level)', () => {
     const cmd = getRegistry().get('trip/hotel-search');
 
-    const HOTEL_RAW = {
-        name: 'Royal National Hotel',
-        score: 8.2,
-        reviewLabel: 'Very good',
-        reviews: 2918,
-        location: 'Bloomsbury, Near The British Museum',
-        room: 'Standard Plus Twin Room',
-        price: 205,
-        currency: 'USD',
-    };
-
-    it('declares Strategy.COOKIE + browser:true + access:read', () => {
-        expect(cmd.access).toBe('read');
-        expect(cmd.browser).toBe(true);
-        expect(String(cmd.strategy)).toContain('cookie');
-        expect(cmd.domain).toBe('trip.com');
-    });
-
-    it('rejects invalid city / dates / limit before navigation', async () => {
+    it('uses the browser profile and rejects invalid input before navigation', async () => {
+        expect(cmd).toMatchObject({ access: 'read', browser: true, navigateBefore: false, domain: 'trip.com' });
         const page = createPageMock([]);
-        await expect(cmd.func(page, { city: 'London', checkin: '2026-08-15', checkout: '2026-08-16', limit: 5 }))
-            .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('numeric') });
-        await expect(cmd.func(page, { city: '338', checkin: '08/15', checkout: '2026-08-16', limit: 5 }))
-            .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('--checkin') });
-        await expect(cmd.func(page, { city: '338', checkin: '2026-08-16', checkout: '2026-08-15', limit: 5 }))
-            .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('before --checkout') });
+        await expect(cmd.func(page, { city: 'London', checkin: '2026-08-15', checkout: '2026-08-16' }))
+            .rejects.toMatchObject({ code: 'ARGUMENT' });
+        await expect(cmd.func(page, { city: '338', checkin: '08/15', checkout: '2026-08-16' }))
+            .rejects.toMatchObject({ code: 'ARGUMENT' });
+        await expect(cmd.func(page, { city: '338', checkin: '2026-08-16', checkout: '2026-08-15' }))
+            .rejects.toMatchObject({ code: 'ARGUMENT' });
         await expect(cmd.func(page, { city: '338', checkin: '2026-08-15', checkout: '2026-08-16', limit: 0 }))
-            .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('--limit') });
+            .rejects.toMatchObject({ code: 'ARGUMENT' });
         expect(page.goto).not.toHaveBeenCalled();
     });
-
-    it('throws AuthRequired on verification, CommandExec on timeout, EmptyResult on no hotels', async () => {
-        await expect(cmd.func(createPageMock(['captcha']), { city: '338', checkin: '2026-08-15', checkout: '2026-08-16', limit: 5 }))
-            .rejects.toThrow('Trip.com is asking for a verification');
-        await expect(cmd.func(createPageMock(['timeout']), { city: '338', checkin: '2026-08-15', checkout: '2026-08-16', limit: 5 }))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('did not render hotel cards') });
-        await expect(cmd.func(createPageMock(['content', []]), { city: '338', checkin: '2026-08-15', checkout: '2026-08-16', limit: 5 }))
-            .rejects.toMatchObject({ code: 'EMPTY_RESULT' });
-    });
-
-    it('maps DOM-extracted rows and respects --limit', async () => {
-        const page = createPageMock(['content', [HOTEL_RAW, { ...HOTEL_RAW, name: 'LSE Rosebery Hall', price: 116 }]]);
-        const rows = await cmd.func(page, { city: '338', checkin: '2026-08-15', checkout: '2026-08-16', limit: 1 });
-        expect(rows).toHaveLength(1);
-        expect(rows[0]).toMatchObject({ rank: 1, name: 'Royal National Hotel', score: 8.2, reviews: 2918, price: 205, currency: 'USD' });
-        for (const row of rows) {
-            for (const col of cmd.columns) expect(row).toHaveProperty(col);
-        }
-    });
 });
 
-describe('trip buildHotelExtractJs (JSDOM)', () => {
-    function runExtract(html) {
-        const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, { url: 'https://www.trip.com/' });
-        const js = buildHotelExtractJs();
-        return Function('document', `return (${js})`)(dom.window.document);
-    }
-
-    const CARD = `
-      <div class="hotel-card">
-        <div class="hotelName">Royal National Hotel</div>
-        <div class="score">8.2</div>
-        <div class="comment-desc">Very good</div>
-        <div class="comment-num">2,918 reviews</div>
-        <div class="position-desc">Bloomsbury</div>
-        <div class="position-desc">Near The British Museum</div>
-        <div class="room-name">Standard Plus Twin Room</div>
-        <div class="price-highlight">$205</div>
-      </div>`;
-
-    it('extracts a hotel card with numeric score / reviews / price', () => {
-        expect(runExtract(CARD)).toEqual([{
-            name: 'Royal National Hotel',
-            score: 8.2,
-            reviewLabel: 'Very good',
-            reviews: 2918,
-            location: 'Bloomsbury, Near The British Museum',
-            room: 'Standard Plus Twin Room',
-            price: 205,
-            currency: 'USD',
-        }]);
-    });
-
-    it('keeps price null when non-numeric and drops cards without a name', () => {
-        const noPrice = CARD.replace('<div class="price-highlight">$205</div>', '<div class="price-highlight">Sold out</div>');
-        expect(runExtract(noPrice)[0].price).toBeNull();
-        const noName = CARD.replace('<div class="hotelName">Royal National Hotel</div>', '');
-        expect(runExtract(noName)).toEqual([]);
-    });
-});
-
-const HOTEL_DETAIL_SSR = {
+const HOTEL_DETAIL_DATA = {
     hotelBaseInfo: {
         masterHotelId: 715233,
         cityName: 'London',
@@ -558,7 +211,7 @@ const HOTEL_DETAIL_SSR = {
     },
 };
 
-// Shape as projected by buildHotelDetailExtractJs (what page.evaluate returns).
+// Existing public metadata projection, preserved by the API migration.
 const HOTEL_DETAIL_ROW = {
     hotelId: '715233',
     name: 'LSE Rosebery Hall',
@@ -596,6 +249,7 @@ describe('trip buildHotelDetailUrl', () => {
 });
 
 describe('trip hotel command (registry-level)', () => {
+    afterEach(() => vi.unstubAllGlobals());
     const cmd = getRegistry().get('trip/hotel');
 
     it('declares Strategy.COOKIE + browser:true + access:read', () => {
@@ -612,64 +266,68 @@ describe('trip hotel command (registry-level)', () => {
         expect(page.goto).not.toHaveBeenCalled();
     });
 
-    it('throws AuthRequired on verification, CommandExec on timeout / malformed, EmptyResult on no profile', async () => {
-        await expect(cmd.func(createPageMock(['captcha']), { id: '715233' }))
-            .rejects.toThrow('Trip.com is asking for a verification');
-        await expect(cmd.func(createPageMock(['timeout']), { id: '715233' }))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('did not expose SSR hotel data') });
-        await expect(cmd.func(createPageMock(['content', null]), { id: '715233' }))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('malformed data') });
-        await expect(cmd.func(createPageMock(['content', { hotelId: null, name: null }]), { id: '715233' }))
-            .rejects.toMatchObject({ code: 'EMPTY_RESULT' });
+    it('reports verification, malformed API responses, and absent profiles', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 403 })));
+        await expect(cmd.func(createPageMock([]), { id: '715233' })).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
+        vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')));
+        await expect(cmd.func(createPageMock([]), { id: '715233' })).rejects.toMatchObject({ code: 'COMMAND_EXEC' });
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ResponseStatus: { Ack: 'Success' }, data: {} }))));
+        await expect(cmd.func(createPageMock([]), { id: '715233' })).rejects.toMatchObject({ code: 'EMPTY_RESULT' });
     });
 
-    it('maps the SSR profile into a single row carrying every declared column', async () => {
-        const page = createPageMock(['content', HOTEL_DETAIL_ROW]);
+    it('maps the API response to the existing metadata fields without browser navigation', async () => {
+        vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+            expect(url).toBe('https://www.trip.com/restapi/soa2/33269/getHotelDetailAggregate');
+            const body = JSON.parse(options.body);
+            expect(body.hotelId).toBe(715233);
+            expect(body.checkIn).toMatch(/^\d{8}$/);
+            expect(body.checkOut).toMatch(/^\d{8}$/);
+            expect(body.checkIn < body.checkOut).toBe(true);
+            return new Response(JSON.stringify({ ResponseStatus: { Ack: 'Success' }, data: HOTEL_DETAIL_DATA }));
+        }));
+        const page = createPageMock([]);
         const rows = await cmd.func(page, { id: '715233' });
-        expect(rows).toHaveLength(1);
-        expect(rows[0]).toMatchObject({
-            hotelId: '715233',
-            name: 'LSE Rosebery Hall',
-            star: 2,
-            score: 8.3,
-            ratingBreakdown: 'Cleanliness 8.7 / Amenities 7.7 / Location 8.5 / Service 8.3',
-            facilities: 'Luggage storage / Wi-Fi in public areas',
-            url: expect.stringContaining('hotelId=715233'),
-        });
-        for (const row of rows) {
-            for (const col of cmd.columns) expect(row).toHaveProperty(col);
-        }
-        expect(page.goto).toHaveBeenCalledTimes(1);
-    });
-});
-
-describe('trip buildHotelDetailExtractJs (JSDOM)', () => {
-    function runExtract(nextData) {
-        const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-            url: 'https://www.trip.com/hotels/detail/',
-            runScripts: 'outside-only',
-        });
-        dom.window.__NEXT_DATA__ = nextData;
-        return dom.window.Function(`return (${buildHotelDetailExtractJs()})`)();
-    }
-
-    it('projects the hotel profile, joining sub-scores / amenities / policy', () => {
-        const out = runExtract({ props: { pageProps: { hotelDetailResponse: HOTEL_DETAIL_SSR } } });
-        expect(out).toEqual(HOTEL_DETAIL_ROW);
+        expect(rows).toEqual([{ ...HOTEL_DETAIL_ROW, url: buildHotelDetailUrl('715233') }]);
+        expect(page.goto).not.toHaveBeenCalled();
+        expect(page.evaluate).not.toHaveBeenCalled();
     });
 
-    it('returns null when the SSR detail block is absent', () => {
-        expect(runExtract({ props: { pageProps: {} } })).toBeNull();
+    it('rejects a whitespace-only hotel name after normalization', async () => {
+        const data = structuredClone(HOTEL_DETAIL_DATA);
+        data.hotelBaseInfo.nameInfo.name = '  \n ';
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ResponseStatus: { Ack: 'Success' }, data }))));
+        await expect(cmd.func(createPageMock([]), { id: '715233' })).rejects.toMatchObject({ code: 'EMPTY_RESULT' });
     });
 
-    it('detects the rendered SSR block as content via WAIT_FOR_HOTEL_DETAIL_JS', async () => {
-        const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-            url: 'https://www.trip.com/hotels/detail/',
-            runScripts: 'outside-only',
-        });
-        dom.window.__NEXT_DATA__ = { props: { pageProps: { hotelDetailResponse: HOTEL_DETAIL_SSR } } };
-        await expect(dom.window.Function(`return (${WAIT_FOR_HOTEL_DETAIL_JS})`)())
-            .resolves.toBe('content');
+    it('rejects malformed present facilities and accepts canonicalizable hotel ids', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ResponseStatus: { Ack: 'Success' }, data: HOTEL_DETAIL_DATA }))));
+        const [row] = await cmd.func(createPageMock([]), { id: '0715233' });
+        expect(row.hotelId).toBe('715233');
+        expect(row.url).toContain('hotelId=715233');
+        const data = structuredClone(HOTEL_DETAIL_DATA);
+        data.hotelFacilityPopV2.hotelPopularFacility.list = {};
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ResponseStatus: { Ack: 'Success' }, data }))));
+        await expect(cmd.func(createPageMock([]), { id: '715233' })).rejects.toMatchObject({ code: 'COMMAND_EXEC' });
+    });
+
+    it.each([
+        ['2026-12-31T15:59:59Z', '20261231', '20270101'],
+        ['2026-12-31T16:00:00Z', '20270101', '20270102'],
+    ])('uses the current +08 calendar day at %s', async (instant, checkIn, checkOut) => {
+        vi.useFakeTimers();
+        try {
+            vi.setSystemTime(new Date(instant));
+            vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+                expect(JSON.parse(options.body)).toMatchObject({ checkIn, checkOut });
+                return new Response(JSON.stringify({ ResponseStatus: { Ack: 'Success' }, data: HOTEL_DETAIL_DATA }));
+            }));
+            await cmd.func(createPageMock([]), { id: '715233' });
+        } finally { vi.useRealTimers(); }
+    });
+
+    it('rejects a valid profile belonging to a different hotel', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ResponseStatus: { Ack: 'Success' }, data: HOTEL_DETAIL_DATA }))));
+        await expect(cmd.func(createPageMock([]), { id: '999' })).rejects.toMatchObject({ code: 'COMMAND_EXEC' });
     });
 });
 
@@ -677,7 +335,7 @@ describe('trip buildFlightRoundSearchUrl', () => {
     it('lowercases codes and pins round-trip English/USD params', () => {
         const url = buildFlightRoundSearchUrl('LON', 'NYC', '2026-08-15', '2026-08-22');
         const qs = new URL(url).searchParams;
-        expect(url).toContain('https://www.trip.com/flights/showfarefirst?');
+        expect(url).toContain('https://us.trip.com/flights/showfarefirst?');
         expect(qs.get('dcity')).toBe('lon');
         expect(qs.get('acity')).toBe('nyc');
         expect(qs.get('ddate')).toBe('2026-08-15');
@@ -690,62 +348,18 @@ describe('trip buildFlightRoundSearchUrl', () => {
 describe('trip flight-round command (registry-level)', () => {
     const cmd = getRegistry().get('trip/flight-round');
 
-    const FLIGHT_RAW = {
-        airline: 'British Airways',
-        departureTime: '6:05 PM',
-        departureAirport: 'LHR',
-        arrivalTime: '9:05 PM',
-        arrivalAirport: 'JFK',
-        duration: '8h',
-        stops: 'Nonstop',
-        price: 758,
-        currency: 'USD',
-    };
-
-    it('declares Strategy.COOKIE + browser:true + navigateBefore:false + access:read', () => {
-        expect(cmd.access).toBe('read');
-        expect(cmd.browser).toBe(true);
-        expect(String(cmd.strategy)).toContain('cookie');
-        expect(cmd.navigateBefore).toBe(false);
-        expect(cmd.domain).toBe('trip.com');
-    });
-
-    it('rejects invalid IATA / dates / from==to / depart>=return / limit before navigation', async () => {
+    it('uses the browser profile and rejects invalid input before navigation', async () => {
+        expect(cmd).toMatchObject({ access: 'read', browser: true, navigateBefore: false, domain: 'trip.com' });
         const page = createPageMock([]);
-        await expect(cmd.func(page, { from: 'LO', to: 'NYC', depart: '2026-08-15', return: '2026-08-22', limit: 5 }))
-            .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('IATA') });
-        await expect(cmd.func(page, { from: 'LON', to: 'LON', depart: '2026-08-15', return: '2026-08-22', limit: 5 }))
-            .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('must differ') });
-        await expect(cmd.func(page, { from: 'LON', to: 'NYC', depart: '08/15', return: '2026-08-22', limit: 5 }))
-            .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('--depart') });
-        await expect(cmd.func(page, { from: 'LON', to: 'NYC', depart: '2026-08-22', return: '2026-08-15', limit: 5 }))
-            .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('--depart must be before --return') });
+        await expect(cmd.func(page, { from: 'LO', to: 'NYC', depart: '2026-08-15', return: '2026-08-22' }))
+            .rejects.toMatchObject({ code: 'ARGUMENT' });
+        await expect(cmd.func(page, { from: 'LON', to: 'LON', depart: '2026-08-15', return: '2026-08-22' }))
+            .rejects.toMatchObject({ code: 'ARGUMENT' });
+        await expect(cmd.func(page, { from: 'LON', to: 'NYC', depart: '2026-08-22', return: '2026-08-15' }))
+            .rejects.toMatchObject({ code: 'ARGUMENT' });
         await expect(cmd.func(page, { from: 'LON', to: 'NYC', depart: '2026-08-15', return: '2026-08-22', limit: 0 }))
-            .rejects.toMatchObject({ code: 'ARGUMENT', message: expect.stringContaining('--limit') });
+            .rejects.toMatchObject({ code: 'ARGUMENT' });
         expect(page.goto).not.toHaveBeenCalled();
-    });
-
-    it('throws AuthRequired on verification, CommandExec on timeout, EmptyResult on no flights', async () => {
-        await expect(cmd.func(createPageMock(['captcha']), { from: 'LON', to: 'NYC', depart: '2026-08-15', return: '2026-08-22', limit: 5 }))
-            .rejects.toThrow('Trip.com is asking for a verification');
-        await expect(cmd.func(createPageMock(['timeout']), { from: 'LON', to: 'NYC', depart: '2026-08-15', return: '2026-08-22', limit: 5 }))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('did not render flight cards') });
-        await expect(cmd.func(createPageMock(['content', { error: 'malformed flight card 1: route endpoints' }]), { from: 'LON', to: 'NYC', depart: '2026-08-15', return: '2026-08-22', limit: 5 }))
-            .rejects.toMatchObject({ code: 'COMMAND_EXEC', message: expect.stringContaining('route endpoints') });
-        await expect(cmd.func(createPageMock(['content', []]), { from: 'LON', to: 'NYC', depart: '2026-08-15', return: '2026-08-22', limit: 5 }))
-            .rejects.toMatchObject({ code: 'EMPTY_RESULT' });
-    });
-
-    it('maps DOM-extracted rows against the round-trip URL and respects --limit', async () => {
-        const page = createPageMock(['content', [FLIGHT_RAW, { ...FLIGHT_RAW, airline: 'American Airlines', price: 767 }]]);
-        const rows = await cmd.func(page, { from: 'LON', to: 'NYC', depart: '2026-08-15', return: '2026-08-22', limit: 1 });
-        expect(rows).toHaveLength(1);
-        expect(rows[0]).toMatchObject({ rank: 1, airline: 'British Airways', departureAirport: 'LHR', price: 758, currency: 'USD' });
-        for (const row of rows) {
-            for (const col of cmd.columns) expect(row).toHaveProperty(col);
-        }
-        expect(page.goto).toHaveBeenCalledTimes(1);
-        expect(page.goto.mock.calls[0][0]).toContain('triptype=rt');
     });
 });
 

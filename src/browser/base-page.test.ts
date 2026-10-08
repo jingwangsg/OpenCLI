@@ -34,6 +34,7 @@ class ActionPage extends BasePage {
   nativeClick?: (x: number, y: number) => Promise<void>;
   setFileInput?: (files: string[], selector?: string) => Promise<void>;
   cdp?: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
+  evaluateOnce?: (js: string) => Promise<unknown>;
 
   async goto(): Promise<void> {}
   async evaluate<T = unknown>(js: string): Promise<T>;
@@ -199,7 +200,7 @@ describe('BasePage native input routing', () => {
     await page.typeText('#q', 'hello');
 
     expect(page.scripts).toHaveLength(2);
-    expect(page.scripts[1]).toContain('document.execCommand');
+    expect(page.scripts[1]).toContain('ownerDocument.execCommand');
     expect(page.scripts[1]).toContain("return 'typed'");
   });
 
@@ -338,6 +339,15 @@ describe('BasePage native input routing', () => {
     });
     expect(page.nativeClick).not.toHaveBeenCalled();
     expect(page.scripts.at(-1)).toContain('el.click()');
+  });
+
+  it('does not replay a DOM click after its result becomes uncertain', async () => {
+    const page = new ActionPage();
+    page.results = [resolveOk, { visible: false }];
+    page.evaluateOnce = vi.fn().mockRejectedValue(new Error('Inspected target navigated or closed'));
+    await expect(page.click('#confirm', { method: 'js' })).rejects.toThrow('Inspected target navigated or closed');
+    expect(page.evaluateOnce).toHaveBeenCalledTimes(1);
+    expect(page.scripts).toHaveLength(2);
   });
 
   it('still rejects ambiguous targets before an explicit DOM click', async () => {

@@ -104,6 +104,7 @@ export default defineConfig({
                 { text: 'Facebook', link: '/adapters/browser/facebook' },
                 { text: 'Google', link: '/adapters/browser/google' },
                 { text: 'Google Maps', link: '/adapters/browser/google-maps' },
+                { text: 'NVIDIA Finder', link: '/adapters/browser/nvfinder' },
                 { text: 'IMDb', link: '/adapters/browser/imdb' },
                 { text: 'Indeed', link: '/adapters/browser/indeed' },
                 { text: 'Upwork', link: '/adapters/browser/upwork' },

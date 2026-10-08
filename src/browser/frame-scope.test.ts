@@ -1,10 +1,26 @@
 import { JSDOM } from 'jsdom';
 import { describe, expect, it } from 'vitest';
 import { buildFindJs, buildSemanticFindJs, type FindResult, type FindError } from './find.js';
-import { boundingRectResolvedJs, clickResolvedJs, getValueResolvedJs, resolveTargetJs } from './target-resolver.js';
+import { boundingRectResolvedJs, clickResolvedJs, getValueResolvedJs, prepareNativeTypeResolvedJs, resolveTargetJs, typeResolvedJs, verifyFilledResolvedJs } from './target-resolver.js';
 import { generateSnapshotJs } from './dom-snapshot.js';
 
 describe('same-origin frame targets', () => {
+  it.each(['input', 'textarea'])('fills and verifies a %s in its owning frame', (tag) => {
+    const dom = new JSDOM('<iframe id="editor"></iframe>', { runScripts: 'outside-only' });
+    const doc = dom.window.document.querySelector('iframe')!.contentDocument!;
+    doc.body.innerHTML = `<${tag} id="field"></${tag}>`;
+    const field = doc.querySelector('#field') as HTMLInputElement | HTMLTextAreaElement;
+    field.scrollIntoView = () => {};
+    let changes = 0;
+    field.addEventListener('change', () => changes++);
+    expect(dom.window.eval(resolveTargetJs('#field', { frame: '#editor' }))).toMatchObject({ ok: true });
+    expect(dom.window.eval(prepareNativeTypeResolvedJs())).toMatchObject({ ok: true });
+    dom.window.eval(typeResolvedJs('SIN-07-A207'));
+    expect(dom.window.eval(verifyFilledResolvedJs('SIN-07-A207'))).toMatchObject({ ok: true, actual: 'SIN-07-A207' });
+    expect(changes).toBe(1);
+    dom.window.close();
+  });
+
   it('allocates a fresh ref when a later snapshot reused the old number on another control', () => {
     const dom = new JSDOM('<button id="parent">Parent edit</button><iframe id="reservations"></iframe>', { runScripts: 'outside-only' });
     const doc = dom.window.document.querySelector('iframe')!.contentDocument!;

@@ -469,28 +469,30 @@ export function typeResolvedJs(text: string): string {
     (() => {
       const el = window.__resolved;
       if (!el) throw new Error('No resolved element');
+      const ownerDocument = el.ownerDocument;
+      const ownerWindow = ownerDocument.defaultView;
       el.focus();
       if (el.isContentEditable) {
-        const sel = window.getSelection();
-        const range = document.createRange();
+        const sel = ownerWindow.getSelection();
+        const range = ownerDocument.createRange();
         range.selectNodeContents(el);
         sel.removeAllRanges();
         sel.addRange(range);
-        document.execCommand('delete', false);
-        document.execCommand('insertText', false, ${safeText});
-        el.dispatchEvent(new Event('input', { bubbles: true }));
+        ownerDocument.execCommand('delete', false);
+        ownerDocument.execCommand('insertText', false, ${safeText});
+        el.dispatchEvent(new ownerWindow.Event('input', { bubbles: true }));
       } else {
-        const proto = el instanceof HTMLTextAreaElement
-          ? HTMLTextAreaElement.prototype
-          : HTMLInputElement.prototype;
+        const proto = el instanceof ownerWindow.HTMLTextAreaElement
+          ? ownerWindow.HTMLTextAreaElement.prototype
+          : ownerWindow.HTMLInputElement.prototype;
         const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
         if (nativeSetter) {
           nativeSetter.call(el, ${safeText});
         } else {
           el.value = ${safeText};
         }
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new ownerWindow.Event('input', { bubbles: true }));
+        el.dispatchEvent(new ownerWindow.Event('change', { bubbles: true }));
       }
       return 'typed';
     })()
@@ -516,6 +518,9 @@ export function prepareNativeTypeResolvedJs(opts: { skipScroll?: boolean; skipFo
     (() => {
       const original = window.__resolved;
       if (!original) throw new Error('No resolved element');
+      const ownerDocument = original.ownerDocument;
+      // Same-origin iframe elements have their own constructors and selection.
+      const ownerWindow = ownerDocument.defaultView;
 
       function nearestContentEditableHost(el) {
         let current = el;
@@ -528,8 +533,8 @@ export function prepareNativeTypeResolvedJs(opts: { skipScroll?: boolean; skipFo
 
       const editableHost = original.isContentEditable ? nearestContentEditableHost(original) : null;
       const inputTypes = new Set(['', 'text', 'search', 'url', 'tel', 'email', 'password']);
-      const isInput = original instanceof HTMLInputElement;
-      const isTextarea = original instanceof HTMLTextAreaElement;
+      const isInput = original instanceof ownerWindow.HTMLInputElement;
+      const isTextarea = original instanceof ownerWindow.HTMLTextAreaElement;
       const isTextControl = isTextarea || (isInput && inputTypes.has((original.getAttribute('type') || original.type || '').toLowerCase()));
       const el = editableHost || (isTextControl ? original : null);
 
@@ -552,9 +557,9 @@ export function prepareNativeTypeResolvedJs(opts: { skipScroll?: boolean; skipFo
       }
 
       if (editableHost) {
-        const sel = window.getSelection();
+        const sel = ownerWindow.getSelection();
         if (!sel) return { ok: false, reason: 'selection_unavailable', mode: 'contenteditable' };
-        const range = document.createRange();
+        const range = ownerDocument.createRange();
         range.selectNodeContents(el);
         sel.removeAllRanges();
         sel.addRange(range);
@@ -593,10 +598,11 @@ export function verifyFilledResolvedJs(expected: string): string {
     (() => {
       const el = window.__resolved;
       if (!el) return { ok: false, reason: 'no_resolved_element' };
+      const ownerWindow = el.ownerDocument.defaultView;
 
       const tag = el.tagName ? el.tagName.toLowerCase() : '';
-      const isInput = el instanceof HTMLInputElement;
-      const isTextarea = el instanceof HTMLTextAreaElement;
+      const isInput = el instanceof ownerWindow.HTMLInputElement;
+      const isTextarea = el instanceof ownerWindow.HTMLTextAreaElement;
       const mode = el.isContentEditable
         ? 'contenteditable'
         : isTextarea

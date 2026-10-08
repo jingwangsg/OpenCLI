@@ -28884,6 +28884,91 @@
     "sourceFile": "nvd/cve.js"
   },
   {
+    "site": "nvfinder",
+    "name": "flexdesk",
+    "description": "List, create, update, cancel, or replace your Singapore Suntec Flex Desk reservation",
+    "access": "write",
+    "example": "opencli --profile prisma nvfinder flexdesk list --date today",
+    "domain": "nvidia.indoorfinders.com",
+    "strategy": "ui",
+    "browser": true,
+    "args": [
+      {
+        "name": "action",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "list, create, update, cancel, or replace",
+        "choices": [
+          "list",
+          "create",
+          "update",
+          "cancel",
+          "replace"
+        ]
+      },
+      {
+        "name": "date",
+        "type": "str",
+        "default": "today",
+        "required": false,
+        "valueRequired": true,
+        "help": "today or YYYY-MM-DD, in Singapore time"
+      },
+      {
+        "name": "id",
+        "type": "int",
+        "required": false,
+        "valueRequired": true,
+        "help": "Reservation ID from list; disambiguates update, cancel, or replace"
+      },
+      {
+        "name": "desk",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Destination desk, such as SIN-07-A207; required for create and replace"
+      },
+      {
+        "name": "start",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Start in HH:mm; required for create, otherwise preserves the original"
+      },
+      {
+        "name": "end",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "End in HH:mm; required for create, otherwise preserves the original"
+      },
+      {
+        "name": "notes",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Notes; omitted preserves existing notes"
+      }
+    ],
+    "columns": [
+      "id",
+      "date",
+      "desk",
+      "location",
+      "start",
+      "end",
+      "notes",
+      "status"
+    ],
+    "type": "js",
+    "modulePath": "nvfinder/flexdesk.js",
+    "sourceFile": "nvfinder/flexdesk.js",
+    "navigateBefore": false,
+    "siteSession": "persistent",
+    "defaultWindowMode": "foreground"
+  },
+  {
     "site": "oeis",
     "name": "search",
     "description": "Search OEIS sequences by keyword or numeric pattern",

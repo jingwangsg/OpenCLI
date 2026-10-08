@@ -331,7 +331,10 @@ export abstract class BasePage implements IPage {
 
     // JS fallback: el.click() dispatches straight on __resolved, bypassing the
     // occluding overlay (also covers older backends / zero-rect targets).
-    const result = await this.evaluate(clickResolvedJs({ skipScroll: nativeScrolled })) as
+    const clickCode = clickResolvedJs({ skipScroll: nativeScrolled });
+    const result = await ((this as IPage).evaluateOnce
+      ? (this as IPage).evaluateOnce!(clickCode)
+      : this.evaluate(clickCode)) as
       | string
       | { status: string; x?: number; y?: number; w?: number; h?: number; error?: string }
       | null;

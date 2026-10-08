@@ -27,8 +27,17 @@ Until `doctor` is green, nothing else will work. Typical failures: Chrome not ru
 - `opencli browser *` commands require a `<session>` positional immediately after `browser`. Use the same session name for a multi-step flow; use a different name to isolate parallel browser work.
 - Use a stable session name for any multi-command or human-paced browser workflow. Example: `opencli browser fb-yaya-warmup open https://example.com`, then reuse `opencli browser fb-yaya-warmup state`, `extract`, `click`, etc.
 - Owned browser sessions keep a tab lease alive between calls. Release it with `opencli browser <session> close` or let the idle timeout expire.
+- For login, activation, or other human-paced waits, prefer binding the existing task tab. If an owned session must stay open longer, use `OPENCLI_BROWSER_IDLE_TIMEOUT=1800 opencli --profile <alias> browser <session> ...` consistently for that workflow. The value is seconds and controls the idle tab lease, not command execution time.
+- If the task tab disappears or becomes `about:blank`, inspect its lease and ownership before reopening or asking for another login. An expired owned tab does not establish that the account was logged out; preserve any authenticated user tab and read its current state.
 - `opencli browser <session> bind` binds the Chrome tab you already have open to that session. Use this for logged-in pages, SSO flows, or pages you manually positioned before handing control to the agent.
 - `--window foreground|background` (or `OPENCLI_WINDOW=foreground|background`) chooses whether OpenCLI creates/focuses a foreground browser window or uses a background browser window for owned sessions.
+
+### Account-bound Edge profiles
+
+- When the user names an email or browser profile, verify the **actual target window's** Edge profile card (`edge://settings/profiles`) before reading account-specific data. An OpenCLI profile alias, the `Local State` directory mapping, and `--profile-directory` launch arguments do not prove which profile owns a window; an already-running Edge process can route a new tab elsewhere.
+- Keep the original task tab open while checking the profile, then close the temporary settings tab. Bind the verified task tab with the matching `--profile` and confirm the site's own account or policy page. Do not infer the selected profile or login state from another site's `AUTH_REQUIRED` or `ERR_NETWORK` error.
+- When the user finishes a login, re-read the **same** bound or leased tab. Do not open a second login or dashboard tab to check it; if an extra owned tab was opened, close only that tab and preserve the user's authenticated one.
+- If present, `~/.opencli/profile-identity.md` records local profile mappings as a starting point only. Reverify the window live because names, process routing, and site sessions can change.
 
 ### Bind Tab
 
@@ -64,9 +73,9 @@ Bound sessions have no OpenCLI idle-close timer; the binding lasts until `unbind
 3. **Prefer numeric ref over CSS once you have it.** Numeric refs survive mild DOM shifts because the CLI fingerprints each tagged element. A CSS selector written by hand will break the first time the site re-renders.
 4. **Read `match_level` after every write.** `exact` = all good. `stable` = the element is the same but some soft attrs drifted — your action still applied. `reidentified` = the original ref was gone and the CLI found a unique replacement; double-check you hit the right element.
 5. **Use the `compound` field for form controls.** Do not regex-guess a date format, do not `state` twice to get the full `<select>` options list. The compound envelope has the format string, full option list up to 50, `options_total` for overflow, and `accept`/`multiple` for `<input type=file>`.
-6. **Verify writes that matter.** After `type <target> <text>`, run `get value <target>`. After `select`, run `get value`. Autocomplete widgets, React controlled inputs, and masked fields all silently eat characters. The CLI cannot detect this for you.
-7. **`state` → action → `state` after a page change.** Navigations, form submits, and SPA route changes invalidate refs. Take a fresh snapshot. Do not reuse refs from before the transition.
-8. **Chain with `&&` when reusing freshly parsed refs.** A chained sequence runs in one shell so the ref you just read from output can be passed directly to the next command. Separate shell invocations keep the named browser session, but any shell-local variables or copied refs from the previous command can go stale after page changes.
+6. **Verify writes that matter.** After `type <target> <text>`, run `get value <target>`. After `select`, run `get value`. After an upload, inspect the intended attachment section and the site's persisted record. Autocomplete widgets, React controlled inputs, file uploaders, and masked fields can silently lose changes.
+7. **Refresh targets after a page change.** Navigations, form submits, and SPA route changes invalidate refs. Use a scoped `find` when the target is known, or `state` to discover the new page. Do not reuse refs from before the transition.
+8. **Await dependent commands.** Keep the same profile and named session, await each action, inspect its result, then perform the next dependent step. If the execution tool returns a running session or cell ID, resume that execution until completion before reading its output file or acting on its result. Separate shell calls preserve browser refs; a page transition invalidates them. Shell chaining does not make browser actions atomic.
 9. **`eval` is read-only.** Wrap the JS in an IIFE and return JSON. If you need to *change* the page, use the structured `click` / `type` / `select` / `keys` commands instead — they produce structured output and fingerprints, `eval` does not.
 10. **Prefer `network` to screen-scraping.** If a page you care about fetches its data from a JSON API, the API is almost always more reliable than scraping the rendered DOM. Capture once, inspect the shape, then `--detail <key>` the body you need.
 
@@ -155,7 +164,7 @@ Error envelope always includes `error.code` and `error.message`. Target errors (
 
 | command | notes |
 |---------|-------|
-| `browser click <target> [--nth N]` | Returns `{clicked, target, matches_n, match_level}`. |
+| `browser click <target> [--nth N] [--method auto\|js]` | Returns `{clicked, target, matches_n, match_level, click_method}`. Default `auto` prefers native input. Explicit `js` dispatches a DOM click after the same target checks; inspect the result before retrying an ineffective native click. |
 | `browser click --role button --name Submit` | Semantic click. Write actions require a unique match; ambiguous locators return candidates instead of clicking the first match. |
 | `browser hover [target] [--role R --name N] [--nth N]` | Moves the mouse over an element. Use for hover menus/tooltips before taking `state` or clicking submenu items. Returns `{hovered, target, matches_n, match_level}`. |
 | `browser focus [target] [--role R --name N] [--nth N]` | Focuses an element without typing. Useful before `keys` or when a page reacts to focus/blur. Returns `{focused, target, matches_n, match_level}`. |
@@ -277,7 +286,12 @@ Every date/time, select, and file input carries a `compound` field. Use it — d
 }
 ```
 
-Do not invent file paths. Upload is done via the normal click flow — respect `accept` when telling the user what to upload.
+Do not invent file paths. Use `browser upload <ref> <absolute-path>` and respect `accept`. When a form has several file inputs, inspect each input's visibility and enclosing label first; duplicate IDs and hidden upload sections can point an otherwise valid upload at the wrong field. Verify the intended section displays the file and, for asynchronous uploads, re-open the saved record to confirm persistence.
+
+- If upload reports a file-chooser interception error, inspect the page and native picker before retrying. A failed CLI call can leave the picker open; blindly retrying can create duplicate attachments. Use an authorized native picker workflow if available, then verify the file on the site.
+- For a native file picker or a batch upload, read [references/uploads.md](references/uploads.md). Use the observed visible Upload/Add files control when a hidden input cannot open the chooser. The reference covers atomic foreground control, exact path entry, batch selection, transfer completion, and saved-file verification.
+- When testing an extension fix, reload the extension or use a fresh browser profile; rebuilding its files does not replace a running worker.
+- After `Save & Submit`, search for the record and read its status. A generic “Saved Successfully” banner does not distinguish a submitted request from a draft. Approval of a prerequisite is not proof that the current request was approved.
 
 ### Where compounds show up
 
@@ -312,17 +326,25 @@ Rule of thumb: **one `state` per page transition, one `find` per follow-up query
 
 ## Chaining rules
 
-**Good — one shell, live session:**
+Commands can share a shell, but each dependent action must follow completion and verification of the previous one. A chain does not replace inspecting an action's envelope or the resulting page.
 
 ```bash
-opencli browser hn open "https://news.ycombinator.com" \
-  && opencli browser hn state \
-  && opencli browser hn click 3
+opencli browser hn open "https://news.ycombinator.com"
+opencli browser hn state
+# Inspect the fresh snapshot before choosing a target.
 ```
 
-**Bad — each line is a fresh shell, refs from call 1 are already forgotten when call 2 runs.** (Only a problem if you rely on shell-scoped state; browser refs themselves persist in-page, but interleaving unrelated shells invites races.) Prefer `&&` when the steps are meant to be atomic.
+Separate shell calls retain the named browser session and in-page refs. Shell-local variables need an explicit handoff. Serialize commands that use the same tab; only parallelize independent reads on independent targets.
 
 **Never** chain a write and then an immediate `state` without a `wait` if the action causes a network round-trip — you will snapshot the pre-response DOM and make bad decisions off stale data.
+
+## Saved forms and draft exports
+
+For multi-page forms, application corrections, or review-copy exports, read [references/saved-forms.md](references/saved-forms.md). It covers binding the existing authenticated tab, compact field discovery, distinguishing a filled field from a saved record, recovering from ineffective clicks, and verifying complete exports. These procedures use the general browser commands; site-specific field mappings belong in the current task's evidence.
+
+## Blocking dialogs
+
+When a command stalls, inspect a screenshot before another retry. For browser confirmation dialogs, file pickers, or autofill popovers, read [references/blocking-dialogs.md](references/blocking-dialogs.md). It covers distinguishing webpage controls from browser UI, locating the correct browser process/window, and verifying the result after dismissal.
 
 ---
 
@@ -402,7 +424,9 @@ opencli browser article extract --start 8000 --chunk-size 8000
 # ...until next_start_char is null
 ```
 
-### Cross-origin iframe
+### Iframes
+
+For same-origin iframe forms, use `find`, `click`, and `get text/value/attributes` with `--frame '<iframe CSS selector>'`. Read [references/iframe-forms.md](references/iframe-forms.md) when controls appear in a snapshot but ordinary locators cannot reach them, or a table/modal is embedded in an iframe. This avoids opening a frame URL outside its required parent context and replaces repeated keyboard navigation with scoped actions.
 
 ```bash
 opencli browser checkout frames
@@ -437,7 +461,7 @@ normal DOM `state`, or navigate/bind directly to the iframe URL when possible.
 | `attach failed: chrome-extension://...` | Disable 1Password / other CDP-hungry extensions temporarily. |
 | `selector_not_found` right after `state` | Page mutated. `wait selector "..."` then retry. |
 | `stale_ref` across every command | You are reusing refs from a prior page. Re-`state`. |
-| `click` succeeds but nothing happens | The element is probably a decorative wrapper stealing clicks from the real target. `find --css "..."` with a narrower selector and retry on the inner element. |
+| `click` succeeds but nothing happens | `clicked: true` proves dispatch, not navigation or saving. Inspect URL, fresh controls, and any validation errors. Check `click_method` and `hit`; a JS fallback or covered target can be ineffective. Inspect the real clickable element before retrying. For an ordinary navigation link, `open` its observed href only after ruling out an unsaved form or required action handler. |
 | `type` appears to finish but value is wrong | Autocomplete, masked input, or React controlled re-render. Verify with `get value`. Add `keys Enter` or re-type. |
 | Giant `get html` output | Pass `--selector` + `--as json --depth 3 --children-max 20 --text-max 200`. |
 | Network cache seems stale | Bump `--ttl` down, or let it expire. The cache lives at `~/.opencli/cache/browser-network/`. |

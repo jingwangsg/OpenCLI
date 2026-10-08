@@ -38,7 +38,11 @@
  * a caller actually traversed.
  */
 
+import { frameDocumentJs, FRAME_POINT_JS } from './frame-scope.js';
+
 export interface ResolveOptions {
+  /** CSS selector of one same-origin iframe. */
+  frame?: string;
   /**
    * When CSS matches multiple elements, pick the element at this 0-based
    * index instead of raising `selector_ambiguous`. Raises
@@ -76,7 +80,11 @@ export function resolveTargetJs(ref: string, opts: ResolveOptions = {}): string 
   const firstOnMulti = opts.firstOnMulti === true ? 'true' : 'false';
   return `
     (() => {
+      const scope = ${frameDocumentJs(opts.frame)};
+      if (scope.error) return { ok: false, ...scope.error };
+      const queryDocument = scope.document;
       const ref = ${safeRef};
+      const requestedFrame = ${JSON.stringify(opts.frame) ?? 'undefined'};
       const nth = ${nthJs};
       const firstOnMulti = ${firstOnMulti};
       const identity = window.__opencli_ref_identity || {};
@@ -102,6 +110,7 @@ export function resolveTargetJs(ref: string, opts: ResolveOptions = {}): string 
             ariaLabel: node.getAttribute('aria-label') || '',
             id: node.id || '',
             testId: node.getAttribute('data-testid') || node.getAttribute('data-test') || '',
+            frame: requestedFrame,
           };
         }
 
@@ -150,18 +159,18 @@ export function resolveTargetJs(ref: string, opts: ResolveOptions = {}): string 
           // unique element, that's our hit.
           try {
             if (fp.id) {
-              const byId = document.getElementById(fp.id);
+              const byId = queryDocument.getElementById(fp.id);
               if (byId) tryAdd(byId);
             }
             if (fp.testId) {
-              const byTestIdA = document.querySelectorAll('[data-testid="' + fp.testId.replace(/"/g, '\\\\"') + '"]');
+              const byTestIdA = queryDocument.querySelectorAll('[data-testid="' + fp.testId.replace(/"/g, '\\\\"') + '"]');
               for (let i = 0; i < byTestIdA.length; i++) tryAdd(byTestIdA[i]);
-              const byTestIdB = document.querySelectorAll('[data-test="' + fp.testId.replace(/"/g, '\\\\"') + '"]');
+              const byTestIdB = queryDocument.querySelectorAll('[data-test="' + fp.testId.replace(/"/g, '\\\\"') + '"]');
               for (let i = 0; i < byTestIdB.length; i++) tryAdd(byTestIdB[i]);
             }
             // aria-label is only a useful shortlist when nothing stronger is set
             if (candidates.length === 0 && fp.ariaLabel) {
-              const byAria = document.querySelectorAll('[aria-label="' + fp.ariaLabel.replace(/"/g, '\\\\"') + '"]');
+              const byAria = queryDocument.querySelectorAll('[aria-label="' + fp.ariaLabel.replace(/"/g, '\\\\"') + '"]');
               for (let i = 0; i < byAria.length; i++) tryAdd(byAria[i]);
             }
           } catch (_) { /* bad selectors from weird fp values — skip */ }
@@ -169,8 +178,13 @@ export function resolveTargetJs(ref: string, opts: ResolveOptions = {}): string 
         }
 
         const fp = identity[ref];
-        let el = document.querySelector('[data-opencli-ref="' + ref + '"]');
-        if (!el) el = document.querySelector('[data-ref="' + ref + '"]');
+        if (fp?.frame && fp.frame !== requestedFrame) {
+          return { ok: false, code: 'frame_mismatch',
+            message: 'ref=' + ref + ' belongs to iframe ' + fp.frame,
+            hint: 'Repeat the same --frame selector used by browser find.' };
+        }
+        let el = queryDocument.querySelector('[data-opencli-ref="' + ref + '"]');
+        if (!el) el = queryDocument.querySelector('[data-ref="' + ref + '"]');
 
         // If the ref tag is gone from the DOM, last-chance reidentify.
         if (!el) {
@@ -232,7 +246,7 @@ export function resolveTargetJs(ref: string, opts: ResolveOptions = {}): string 
       {
         let matches;
         try {
-          matches = document.querySelectorAll(ref);
+          matches = queryDocument.querySelectorAll(ref);
         } catch (e) {
           return {
             ok: false,
@@ -306,8 +320,10 @@ export function boundingRectResolvedJs(opts: { skipScroll?: boolean; forClick?: 
   const forClick = opts.forClick ? 'true' : 'false';
   return `
     (() => {
+      ${FRAME_POINT_JS}
       const el = window.__resolved;
       if (!el) throw new Error('No resolved element');
+      const ownerDocument = el.ownerDocument || document;
       if (${shouldScroll}) el.scrollIntoView({ behavior: 'instant', block: 'center' });
 
       const FOR_CLICK = ${forClick};
@@ -315,9 +331,10 @@ export function boundingRectResolvedJs(opts: { skipScroll?: boolean; forClick?: 
       // below are click-only so those actions keep their original behaviour.
       if (!FOR_CLICK) {
         const r0 = el.getBoundingClientRect();
+        const point = topViewportPoint(ownerDocument, r0.left + r0.width / 2, r0.top + r0.height / 2);
         return {
-          x: Math.round(r0.left + r0.width / 2),
-          y: Math.round(r0.top + r0.height / 2),
+          x: point.x,
+          y: point.y,
           w: Math.round(r0.width),
           h: Math.round(r0.height),
           visible: Math.round(r0.width) > 0 && Math.round(r0.height) > 0,
@@ -387,7 +404,7 @@ export function boundingRectResolvedJs(opts: { skipScroll?: boolean; forClick?: 
       //                bug); the caller then dispatches a direct DOM click.
       const hitClass = (px, py) => {
         let at = null;
-        try { at = document.elementFromPoint(px, py); } catch (e) { return 'none'; }
+        try { at = ownerDocument.elementFromPoint(px, py); } catch (e) { return 'none'; }
         if (!at) return 'none';
         if (at === target || target.contains(at)) return 'target';
         if (at.contains && at.contains(target)) return 'ancestor';
@@ -409,7 +426,8 @@ export function boundingRectResolvedJs(opts: { skipScroll?: boolean; forClick?: 
           if (hc === 'target' || hc === 'ancestor') { x = px; y = py; hit = hc; break; }
         }
       }
-      return { x, y, w, h, visible, hit, retargeted };
+      const point = topViewportPoint(ownerDocument, x, y);
+      return { x: point.x, y: point.y, w, h, visible, hit: point.clear ? hit : 'other', retargeted };
     })()
   `;
 }
@@ -426,12 +444,12 @@ export function clickResolvedJs(opts: { skipScroll?: boolean } = {}): string {
   const shouldScroll = opts.skipScroll ? 'false' : 'true';
   return `
     (() => {
+      ${FRAME_POINT_JS}
       const el = window.__resolved;
       if (!el) throw new Error('No resolved element');
       if (${shouldScroll}) el.scrollIntoView({ behavior: 'instant', block: 'center' });
       const rect = el.getBoundingClientRect();
-      const x = Math.round(rect.left + rect.width / 2);
-      const y = Math.round(rect.top + rect.height / 2);
+      const { x, y } = topViewportPoint(el.ownerDocument || document, rect.left + rect.width / 2, rect.top + rect.height / 2);
       try {
         el.click();
         return { status: 'clicked', x, y, w: Math.round(rect.width), h: Math.round(rect.height) };

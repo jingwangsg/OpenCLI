@@ -29,6 +29,7 @@
  */
 
 import { COMPOUND_INFO_JS, type CompoundInfo } from './compound.js';
+import { frameDocumentJs } from './frame-scope.js';
 
 /** Whitelist of attributes surfaced per entry. Keep small; agents do not need full DOM dumps. */
 export const FIND_ATTR_WHITELIST = [
@@ -74,13 +75,15 @@ export interface FindResult {
 
 export interface FindError {
   error: {
-    code: 'invalid_selector' | 'selector_not_found' | 'semantic_not_found';
+    code: 'invalid_selector' | 'selector_not_found' | 'selector_ambiguous' | 'frame_unavailable' | 'semantic_not_found';
     message: string;
     hint?: string;
   };
 }
 
 export interface FindOptions {
+  /** CSS selector of one same-origin iframe. */
+  frame?: string;
   /** Max entries returned. Default 50 — enough to pick from without flooding context. */
   limit?: number;
   /** Max chars of trimmed text per entry. Default 120. */
@@ -107,6 +110,9 @@ export function buildFindJs(selector: string, opts: FindOptions = {}): string {
 
   return `
     (() => {
+      const scope = ${frameDocumentJs(opts.frame)};
+      if (scope.error) return { error: scope.error };
+      const queryDocument = scope.document;
       const sel = ${safeSel};
       const LIMIT = ${limit};
       const TEXT_MAX = ${textMax};
@@ -116,7 +122,7 @@ export function buildFindJs(selector: string, opts: FindOptions = {}): string {
 
       let matches;
       try {
-        matches = document.querySelectorAll(sel);
+        matches = queryDocument.querySelectorAll(sel);
       } catch (e) {
         return {
           error: {
@@ -172,7 +178,7 @@ export function buildFindJs(selector: string, opts: FindOptions = {}): string {
       // map was cleared but annotations remain (e.g. soft navigation without a
       // fresh snapshot). Guarantees allocated refs don't collide.
       try {
-        const tagged = document.querySelectorAll('[data-opencli-ref]');
+        const tagged = [...document.querySelectorAll('[data-opencli-ref]'), ...queryDocument.querySelectorAll('[data-opencli-ref]')];
         for (let t = 0; t < tagged.length; t++) {
           const v = tagged[t].getAttribute('data-opencli-ref');
           const n = v != null && /^\\d+$/.test(v) ? parseInt(v, 10) : NaN;
@@ -188,6 +194,7 @@ export function buildFindJs(selector: string, opts: FindOptions = {}): string {
           ariaLabel: el.getAttribute('aria-label') || '',
           id: el.id || '',
           testId: el.getAttribute('data-testid') || el.getAttribute('data-test') || '',
+          frame: ${JSON.stringify(opts.frame) ?? 'undefined'},
         };
       }
 
@@ -197,15 +204,14 @@ export function buildFindJs(selector: string, opts: FindOptions = {}): string {
         const el = matches[i];
         const refAttr = el.getAttribute('data-opencli-ref');
         let refNum = refAttr != null && /^\\d+$/.test(refAttr) ? parseInt(refAttr, 10) : null;
-        if (refNum === null) {
+        const fingerprint = fingerprintOf(el);
+        const previous = refNum === null ? null : identity['' + refNum];
+        // A snapshot can reuse a number while an unvisited table control retains its old tag.
+        if (refNum === null || (previous && Object.keys(fingerprint).some(key => previous[key] !== fingerprint[key]))) {
           refNum = ++maxRef;
           try { el.setAttribute('data-opencli-ref', '' + refNum); } catch (_) {}
-          identity['' + refNum] = fingerprintOf(el);
-        } else if (!identity['' + refNum]) {
-          // Ref annotation survived but identity map was cleared — repopulate so the
-          // target resolver's fingerprint check passes on downstream calls.
-          identity['' + refNum] = fingerprintOf(el);
         }
+        identity['' + refNum] = fingerprintOf(el);
         const text = (el.textContent || '').trim();
         const entry = {
           nth: i,
@@ -243,6 +249,9 @@ export function buildSemanticFindJs(opts: SemanticFindOptions): string {
 
   return `
     (() => {
+      const scope = ${frameDocumentJs(opts.frame)};
+      if (scope.error) return { error: scope.error };
+      const queryDocument = scope.document;
       const CRITERIA = ${criteria};
       const LIMIT = ${limit};
       const TEXT_MAX = ${textMax};
@@ -291,7 +300,7 @@ export function buildSemanticFindJs(opts: SemanticFindOptions): string {
         }
         if (el.id) {
           try {
-            const label = document.querySelector('label[for="' + cssEscape(el.id) + '"]');
+            const label = queryDocument.querySelector('label[for="' + cssEscape(el.id) + '"]');
             if (label) parts.push(label.textContent || '');
           } catch (_) {}
         }
@@ -306,7 +315,7 @@ export function buildSemanticFindJs(opts: SemanticFindOptions): string {
         for (const id of String(ids).split(/\\s+/)) {
           if (!id) continue;
           try {
-            const el = document.getElementById(id);
+            const el = queryDocument.getElementById(id);
             if (el) parts.push(el.textContent || '');
           } catch (_) {}
         }
@@ -354,6 +363,7 @@ export function buildSemanticFindJs(opts: SemanticFindOptions): string {
           ariaLabel: el.getAttribute('aria-label') || '',
           id: el.id || '',
           testId: el.getAttribute('data-testid') || el.getAttribute('data-test') || '',
+          frame: ${JSON.stringify(opts.frame) ?? 'undefined'},
         };
       }
 
@@ -371,7 +381,7 @@ export function buildSemanticFindJs(opts: SemanticFindOptions): string {
         return true;
       }
 
-      const candidates = Array.from(document.querySelectorAll([
+      const candidates = Array.from(queryDocument.querySelectorAll([
         'a[href]',
         'button',
         'input',
@@ -406,7 +416,7 @@ export function buildSemanticFindJs(opts: SemanticFindOptions): string {
         if (!isNaN(n) && n > maxRef) maxRef = n;
       }
       try {
-        const tagged = document.querySelectorAll('[data-opencli-ref]');
+        const tagged = [...document.querySelectorAll('[data-opencli-ref]'), ...queryDocument.querySelectorAll('[data-opencli-ref]')];
         for (let t = 0; t < tagged.length; t++) {
           const v = tagged[t].getAttribute('data-opencli-ref');
           const n = v != null && /^\\d+$/.test(v) ? parseInt(v, 10) : NaN;
@@ -420,13 +430,14 @@ export function buildSemanticFindJs(opts: SemanticFindOptions): string {
         const el = matchesList[i];
         const refAttr = el.getAttribute('data-opencli-ref');
         let refNum = refAttr != null && /^\\d+$/.test(refAttr) ? parseInt(refAttr, 10) : null;
-        if (refNum === null) {
+        const fingerprint = fingerprintOf(el);
+        const previous = refNum === null ? null : identity['' + refNum];
+        // A snapshot can reuse a number while an unvisited table control retains its old tag.
+        if (refNum === null || (previous && Object.keys(fingerprint).some(key => previous[key] !== fingerprint[key]))) {
           refNum = ++maxRef;
           try { el.setAttribute('data-opencli-ref', '' + refNum); } catch (_) {}
-          identity['' + refNum] = fingerprintOf(el);
-        } else if (!identity['' + refNum]) {
-          identity['' + refNum] = fingerprintOf(el);
         }
+        identity['' + refNum] = fingerprintOf(el);
         const text = (el.textContent || '').trim();
         const entry = {
           nth: i,

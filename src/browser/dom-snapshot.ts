@@ -671,6 +671,8 @@ export function generateSnapshotJs(opts: DomSnapshotOptions = {}): string {
     const tag = el.tagName.toLowerCase();
     if (SKIP_TAGS.has(tag)) return false;
     if (isAdElement(el)) return false;
+    // Hidden templates have zero area; filter them before table/iframe serialization.
+    if (!isVisibleByCSS(el) && !(tag === 'input' && el.type === 'file')) return false;
 
     // SVG: emit tag, collapse children
     if (tag === 'svg') {
@@ -708,9 +710,6 @@ export function generateSnapshotJs(opts: DomSnapshotOptions = {}): string {
     let rect;
     try { rect = el.getBoundingClientRect(); } catch { return false; }
     const hasArea = rect.width > 0 && rect.height > 0;
-    if (hasArea && !isVisibleByCSS(el)) {
-      if (!(tag === 'input' && el.type === 'file')) return false;
-    }
 
     // \`interactive\` gets demoted below if bbox containment folds this node
     // into a propagating ancestor — using \`let\` so the dedup pass can mutate it.

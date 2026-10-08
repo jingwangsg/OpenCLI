@@ -1518,7 +1518,9 @@ Examples:
       const value = opts[key];
       if (typeof value === 'string' && value.trim()) locator[key] = value.trim();
     }
-    return Object.keys(locator).length > 0 ? locator : null;
+    if (Object.keys(locator).length === 0) return null;
+    if (typeof opts.frame === 'string') locator.frame = opts.frame;
+    return locator;
   };
 
   const prefixedSemanticLocatorFromOptions = (opts: Record<string, unknown>, prefix: string): SemanticFindOptions | null => {
@@ -1702,6 +1704,7 @@ Examples:
   addBrowserTabOption(
     addSemanticLocatorOptions(browser.command('find'))
       .option('--css <selector>', 'CSS selector (required)')
+      .option('--frame <css>', 'Scope to one same-origin iframe selected by CSS')
       .option('--limit <n>', 'Max entries returned', '50')
       .option('--text-max <n>', 'Max chars of trimmed text per entry', '120')
       .description('Find DOM elements by CSS or semantic locator — returns JSON {matches_n, entries[]}'),
@@ -1749,6 +1752,7 @@ Examples:
               textMax: textMax as number | null ?? undefined,
             })
           : buildFindJs(opts.css, {
+              frame: opts.frame,
               limit: limit as number | null ?? undefined,
               textMax: textMax as number | null ?? undefined,
             }),
@@ -1805,6 +1809,7 @@ Examples:
       return;
     }
     const { matches_n, match_level } = await resolveRef(page, targetRef, {
+      ...(typeof opts.frame === 'string' ? { frame: opts.frame } : {}),
       firstOnMulti: nth === null,
       ...(typeof nth === 'number' ? { nth } : {}),
     });
@@ -1828,6 +1833,7 @@ Examples:
 
   addBrowserTabOption(
     addSemanticLocatorOptions(get.command('text'))
+      .option('--frame <css>', 'Scope to one same-origin iframe selected by CSS')
       .argument('[target]', 'Numeric ref (from browser state / find), CSS selector, or omit when using --role/--name/etc.')
       .option('--nth <n>', 'Pick the nth match (0-based) when <target> is a multi-match CSS selector')
       .description('Element text content — JSON envelope {value, matches_n}'),
@@ -1837,6 +1843,7 @@ Examples:
 
   addBrowserTabOption(
     addSemanticLocatorOptions(get.command('value'))
+      .option('--frame <css>', 'Scope to one same-origin iframe selected by CSS')
       .argument('[target]', 'Numeric ref (from browser state / find), CSS selector, or omit when using --role/--name/etc.')
       .option('--nth <n>', 'Pick the nth match (0-based) when <target> is a multi-match CSS selector')
       .description('Input/textarea value — JSON envelope {value, matches_n}'),
@@ -1968,6 +1975,7 @@ Examples:
 
   addBrowserTabOption(
     addSemanticLocatorOptions(get.command('attributes'))
+      .option('--frame <css>', 'Scope to one same-origin iframe selected by CSS')
       .argument('[target]', 'Numeric ref (from browser state / find), CSS selector, or omit when using --role/--name/etc.')
       .option('--nth <n>', 'Pick the nth match (0-based) when <target> is a multi-match CSS selector')
       .description('Element attributes — JSON envelope {value, matches_n}'),
@@ -2038,8 +2046,10 @@ Examples:
 
   addBrowserTabOption(
     addSemanticLocatorOptions(browser.command('click'))
+      .option('--frame <css>', 'Scope to one same-origin iframe selected by CSS')
       .argument('[target]', 'Numeric ref (from browser state / find), CSS selector, or omit when using --role/--name/etc.')
       .option('--nth <n>', 'When <target> is a multi-match CSS selector, pick the nth match (0-based)')
+      .addOption(new Option('--method <method>', 'Click transport: auto or explicit DOM click').choices(['auto', 'js']))
       .description('Click element — JSON envelope {clicked, target, matches_n}'),
   )
     .action(browserAction(async (page, target, opts) => {
@@ -2055,7 +2065,11 @@ Examples:
         process.exitCode = EXIT_CODES.USAGE_ERROR;
         return;
       }
-      const { matches_n, match_level, click_method, hit, retargeted } = await page.click(resolvedTarget, parsed.opts);
+      const { matches_n, match_level, click_method, hit, retargeted } = await page.click(resolvedTarget, {
+        ...parsed.opts,
+        ...(typeof opts?.frame === 'string' && { frame: opts.frame }),
+        ...(opts?.method === 'js' && { method: 'js' as const }),
+      });
       console.log(JSON.stringify({
         clicked: true, target: resolvedTarget, matches_n, match_level,
         ...(click_method && { click_method }),

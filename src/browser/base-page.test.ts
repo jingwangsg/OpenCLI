@@ -324,6 +324,32 @@ describe('BasePage native input routing', () => {
     expect(page.scripts.join('\n')).not.toContain('el.click()');
   });
 
+  it('honors explicit DOM click when a native click could report success without activating the target', async () => {
+    const page = new ActionPage();
+    page.nativeClick = vi.fn().mockResolvedValue(undefined);
+    page.results = [
+      resolveOk,
+      { x: 50, y: 100, w: 200, h: 32, visible: true, hit: 'target' },
+      { status: 'clicked' },
+    ];
+
+    await expect(page.click('#save', { method: 'js' })).resolves.toMatchObject({
+      matches_n: 1, match_level: 'exact', click_method: 'js',
+    });
+    expect(page.nativeClick).not.toHaveBeenCalled();
+    expect(page.scripts.at(-1)).toContain('el.click()');
+  });
+
+  it('still rejects ambiguous targets before an explicit DOM click', async () => {
+    const page = new ActionPage();
+    page.nativeClick = vi.fn().mockResolvedValue(undefined);
+    page.results = [{ ok: false, code: 'selector_ambiguous', message: 'Multiple targets', matches_n: 2 }];
+
+    await expect(page.click('.save', { method: 'js' })).rejects.toMatchObject({ code: 'selector_ambiguous' });
+    expect(page.nativeClick).not.toHaveBeenCalled();
+    expect(page.scripts).toHaveLength(1);
+  });
+
   it('clicks AX snapshot refs through backend node coordinates without DOM resolver', async () => {
     const page = new ActionPage();
     page.nativeClick = vi.fn().mockResolvedValue(undefined);

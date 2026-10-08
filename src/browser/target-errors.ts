@@ -27,6 +27,8 @@ export type TargetErrorCode =
   | 'selector_not_found'
   | 'selector_ambiguous'
   | 'selector_nth_out_of_range'
+  | 'frame_unavailable'
+  | 'frame_mismatch'
   | 'not_editable'
   | 'not_checkable'
   | 'not_file_input';

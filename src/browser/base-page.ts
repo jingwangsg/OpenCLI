@@ -304,8 +304,8 @@ export abstract class BasePage implements IPage {
 
   // ── Shared DOM helper implementations ──
 
-  async click(ref: string, opts: ResolveOptions = {}): Promise<ResolveSuccess> {
-    const axClick = await this.tryClickAxRef(ref);
+  async click(ref: string, opts: ResolveOptions & { method?: 'auto' | 'js' } = {}): Promise<ResolveSuccess> {
+    const axClick = opts.method === 'js' || opts.frame ? null : await this.tryClickAxRef(ref);
     if (axClick) return axClick;
 
     // Phase 1: Resolve target with fingerprint verification
@@ -324,7 +324,7 @@ export abstract class BasePage implements IPage {
     // or an ancestor (open shadow-DOM host / own wrapper — CDP still reaches the
     // target there). Only an unrelated overlay ('other') forces the el.click()
     // fallback, which dispatches straight on the node. See issues #2076/#2071.
-    if (rect?.visible === true && (rect.hit === 'target' || rect.hit === 'ancestor')) {
+    if (opts.method !== 'js' && rect?.visible === true && (rect.hit === 'target' || rect.hit === 'ancestor')) {
       const success = await this.tryNativeClick(rect.x, rect.y);
       if (success) return { ...resolved, click_method: 'cdp', ...meta };
     }
@@ -341,7 +341,7 @@ export abstract class BasePage implements IPage {
     if (result.status === 'clicked') return { ...resolved, click_method: 'js', ...meta };
 
     // JS click failed — try CDP native click if coordinates available
-    if (result.x != null && result.y != null) {
+    if (opts.method !== 'js' && result.x != null && result.y != null) {
       const success = await this.tryNativeClick(result.x, result.y);
       if (success) return { ...resolved, click_method: 'cdp', ...meta };
     }
@@ -534,6 +534,8 @@ export abstract class BasePage implements IPage {
           if (!el || el.nodeType !== 1 || typeof el.setAttribute !== 'function') {
             return { ok: false };
           }
+          // The CDP query below targets the top document; frame targets use DOM focus/scroll.
+          if (el.ownerDocument !== document) return { ok: false };
           el.setAttribute(markerAttr, markerValue);
           return { ok: true };
         })()

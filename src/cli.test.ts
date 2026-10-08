@@ -559,7 +559,7 @@ describe('createProgram root help descriptions', () => {
         usage: 'opencli browser <session> click [target] [options]',
         positionals: [{ name: 'target' }],
       });
-      expect(click.command_options.map((option: any) => option.name)).toEqual(['role', 'name', 'label', 'text', 'testid', 'nth', 'tab']);
+      expect(click.command_options.map((option: any) => option.name)).toEqual(['role', 'name', 'label', 'text', 'testid', 'frame', 'nth', 'method', 'tab']);
 
       const tabList = data.commands.find((cmd: any) => cmd.name === 'tab list');
       expect(tabList).toMatchObject({
@@ -643,7 +643,7 @@ describe('createProgram root help descriptions', () => {
           usage: 'opencli browser <session> click --help -f yaml',
         },
       });
-      expect(data.command_options.map((option: any) => option.name)).toEqual(['role', 'name', 'label', 'text', 'testid', 'nth', 'tab']);
+      expect(data.command_options.map((option: any) => option.name)).toEqual(['role', 'name', 'label', 'text', 'testid', 'frame', 'nth', 'method', 'tab']);
       // session is hidden; only `window` surfaces as a namespace option.
       expect(data.namespace_options.map((option: any) => option.name)).toEqual(['window']);
       expect(data.global_options.map((option: any) => option.name)).toContain('profile');
@@ -3181,6 +3181,16 @@ describe('browser click/type commands', () => {
 
     expect(browserState.page!.click).toHaveBeenCalledWith('.btn', { nth: 2 });
     expect(lastJsonLog()).toEqual({ clicked: true, target: '.btn', matches_n: 3, match_level: 'exact' });
+  });
+
+  it('forwards an explicit DOM method and preserves nth selection', async () => {
+    (browserState.page!.click as any).mockResolvedValueOnce({ matches_n: 2, match_level: 'exact', click_method: 'js' });
+    const program = createProgram('', '');
+
+    await program.parseAsync(['node', 'opencli', 'browser', '--session', 'test', 'click', '.btn', '--nth', '1', '--method', 'js']);
+
+    expect(browserState.page!.click).toHaveBeenCalledWith('.btn', { nth: 1, method: 'js' });
+    expect(lastJsonLog()).toMatchObject({ clicked: true, click_method: 'js', target: '.btn' });
   });
 
   it('surfaces selector_ambiguous from page.click as an error envelope', async () => {

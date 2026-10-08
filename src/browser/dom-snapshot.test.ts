@@ -10,9 +10,22 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { JSDOM } from 'jsdom';
 import { generateSnapshotJs, scrollToRefJs, getFormStateJs } from './dom-snapshot.js';
 
 describe('generateSnapshotJs', () => {
+  it('omits hidden notices and hidden tables even when their layout size is zero', () => {
+    const dom = new JSDOM(`<main><p>Reservation is editable</p>
+      <div style="display:none" role="status">Start time cannot be changed</div>
+      <table style="display:none"><tr><th>Status</th></tr><tr><td>Cancelled</td></tr></table>
+      </main>`, { runScripts: 'outside-only' });
+    const snapshot = dom.window.eval(generateSnapshotJs());
+    expect(snapshot).toContain('Reservation is editable');
+    expect(snapshot).not.toContain('Start time cannot be changed');
+    expect(snapshot).not.toContain('Cancelled');
+    dom.window.close();
+  });
+
   it('returns a non-empty string', () => {
     const js = generateSnapshotJs();
     expect(typeof js).toBe('string');

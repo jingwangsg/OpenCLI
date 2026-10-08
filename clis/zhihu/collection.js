@@ -1,3 +1,4 @@
+import { createZhihuClient } from './api.js';
 import { cli, Strategy } from '@jackwener/opencli/registry';
 import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
 import { log } from '@jackwener/opencli/logger';
@@ -19,15 +20,9 @@ function validateNonNegativeInt(value, name) {
   return n;
 }
 
-async function fetchCollectionPage(page, collectionId, offset, limit) {
+async function fetchCollectionPage(api, collectionId, offset, limit) {
   const url = `https://www.zhihu.com/api/v4/collections/${collectionId}/items?offset=${offset}&limit=${limit}`;
-  const data = await page.evaluate(`
-    (async () => {
-      const r = await fetch(${JSON.stringify(url)}, { credentials: 'include' });
-      if (!r.ok) return { __httpError: r.status };
-      return await r.json();
-    })()
-  `);
+  const data = await api.get(url);
 
   if (!data || data.__httpError) {
     const status = data?.__httpError;
@@ -109,14 +104,16 @@ cli({
   description: '知乎收藏夹内容列表（需要登录）',
   domain: 'www.zhihu.com',
   strategy: Strategy.COOKIE,
-  browser: true,
+  browser: false,
+  navigateBefore: false,
   args: [
+        { name: 'profile', valueRequired: true, help: 'Browser profile alias or context ID' },
     { name: 'id', positional: true, required: true, help: '收藏夹 ID (数字，可从收藏夹 URL 中获取)' },
     { name: 'offset', type: 'int', default: 0, help: '起始偏移量（用于分页）' },
     { name: 'limit', type: 'int', default: 20, help: '每页数量（最大 20）' },
   ],
   columns: ['rank', 'type', 'title', 'author', 'votes', 'excerpt', 'url'],
-  func: async (page, kwargs) => {
+  func: async (kwargs) => {
     const { id, offset = 0, limit = 20 } = kwargs;
 
     const collectionId = String(id);
@@ -131,7 +128,7 @@ cli({
     const pageLimit = Math.min(requestedLimit, 20); // 知乎 API 限制每页最大 20
 
     // 先访问知乎主页建立 session
-    await page.goto('https://www.zhihu.com');
+        const api = await createZhihuClient(kwargs.profile);
 
     const collected = [];
     const seen = new Set();
@@ -140,7 +137,7 @@ cli({
     const maxPages = Math.ceil(requestedLimit / pageLimit) + 2;
     for (let pageIndex = 0; pageIndex < maxPages && collected.length < requestedLimit; pageIndex += 1) {
       const currentFetchLimit = Math.min(pageLimit, requestedLimit - collected.length);
-      const data = await fetchCollectionPage(page, collectionId, nextOffset, currentFetchLimit);
+      const data = await fetchCollectionPage(api, collectionId, nextOffset, currentFetchLimit);
       const items = Array.isArray(data.data) ? data.data : [];
       const paging = data.paging || {};
       totals = Number(paging.totals || totals || 0);

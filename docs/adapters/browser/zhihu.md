@@ -1,11 +1,28 @@
 # Zhihu
 
-**Mode**: 🔐 Browser · **Domain**: `zhihu.com`
+**Mode**: 🔐 Profile-authenticated API reads; browser login and writes · **Domain**: `zhihu.com`
+
+## Quick Start
+
+```bash
+opencli profile list
+opencli --profile edge zhihu login
+opencli --profile edge zhihu auth-sync
+opencli --profile edge zhihu whoami
+opencli --profile edge zhihu search "机器人" --limit 5 -f json
+```
+
+Replace `edge` with your browser profile. Complete login in the browser once, then sync its existing session. Login with an explicit profile also refreshes the cache automatically. Keep the same `--profile` for subsequent commands; both `opencli --profile edge zhihu search ...` and `opencli zhihu search ... --profile edge` work.
+
+The read commands below use Node HTTP requests with that profile's cached Cookie and actual User-Agent. They do not open tabs, require a running browser or Browser Bridge, or switch to another profile. Sessions are stored per profile under `~/.opencli/auth/zhihu/` with private file permissions. When a session expires, log in and run `auth-sync` again. `login`, `auth-sync`, write commands, and `download` still use the browser.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
+| `opencli zhihu login` | Open Zhihu login and wait for authentication |
+| `opencli zhihu auth-sync --profile <name>` | Sync the existing browser session for API reads |
+| `opencli zhihu whoami` | Verify the current logged-in account |
 | `opencli zhihu hot` | Read Zhihu hot topics |
 | `opencli zhihu recommend` | Read Zhihu home recommendations |
 | `opencli zhihu search` | Search Zhihu content |
@@ -15,6 +32,12 @@
 | `opencli zhihu collections` | List your Zhihu favorite collections |
 | `opencli zhihu collection <collection_id>` | List content from a Zhihu favorite collection |
 | `opencli zhihu download` | Export a Zhihu column article or answer to Markdown |
+| `opencli zhihu user <user>` | Read a user's profile |
+| `opencli zhihu user-answers <user>` | List a user's answers |
+| `opencli zhihu user-articles <user>` | List a user's articles |
+| `opencli zhihu pins <user>` | List a user's short posts |
+| `opencli zhihu following <user>` | List people a user follows |
+| `opencli zhihu followers <user>` | List a user's followers |
 | `opencli zhihu follow <target> --execute` | Follow a user or question |
 | `opencli zhihu like <target> --execute` | Like an answer or article |
 | `opencli zhihu favorite <target> (--collection <name> \| --collection-id <id>) --execute` | Favorite an answer or article into a specific collection |
@@ -78,6 +101,12 @@ opencli zhihu hot -f json
 - `search --type` supports `all`, `answer`, `article`, and `question`
 - `search --limit` supports up to 1000 results, but normal-sized requests are recommended
 
+## Hot List Notes
+
+- `hot` returns rank, title, heat, answer count, and the exact question URL. `--limit` must be a positive integer; requests above the available hot list return all available topics.
+- Authentication failures, HTTP failures, malformed responses, and a valid empty list produce distinct errors instead of an empty success.
+- The command uses Zhihu's existing hot-list endpoint through direct HTTP requests. This internal endpoint can change; question IDs are preserved as strings before JSON parsing because newer IDs exceed JavaScript's safe integer range.
+
 ## Comment Notes
 
 - `answer-comments --order score|latest` selects Zhihu's scored or chronological root-comment order
@@ -87,6 +116,6 @@ opencli zhihu hot -f json
 
 ## Prerequisites
 
-- Chrome running and **logged into** zhihu.com
-- [Browser Bridge extension](/guide/browser-bridge) installed
-- A logged-in Zhihu session that can access both `www.zhihu.com` and `zhuanlan.zhihu.com`
+- API reads require a synced, unexpired session in the selected profile.
+- Initial login/sync, writes, and downloads require a running browser with the [Browser Bridge extension](/guide/browser-bridge).
+- Article writes and downloads also require access to `zhuanlan.zhihu.com`.

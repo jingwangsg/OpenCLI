@@ -1,3 +1,4 @@
+import { createZhihuClient } from './api.js';
 import { cli, Strategy } from '@jackwener/opencli/registry';
 import { CommandExecutionError } from '@jackwener/opencli/errors';
 import { parseZhihuUser } from './user-arg.js';
@@ -12,17 +13,20 @@ cli({
     description: '知乎某用户的粉丝列表',
     domain: 'www.zhihu.com',
     strategy: Strategy.COOKIE,
+    browser: false,
+    navigateBefore: false,
     args: [
+        { name: 'profile', valueRequired: true, help: 'Browser profile alias or context ID' },
         { name: 'user', type: 'string', required: true, positional: true, help: 'User url_token or people URL' },
         { name: 'limit', type: 'int', default: 20, help: 'Number of followers to return (max 1000)' },
     ],
     columns: ['rank', 'name', 'url_token', 'headline', 'followers', 'url'],
-    func: async (page, kwargs) => {
+    func: async (kwargs) => {
         const slug = parseZhihuUser(kwargs.user);
         const limit = validateLimit(kwargs.limit);
-        await page.goto('https://www.zhihu.com');
+        const api = await createZhihuClient(kwargs.profile);
         const first = `https://www.zhihu.com/api/v4/members/${encodeURIComponent(slug)}/followers?limit=20&offset=0&include=${encodeURIComponent(INCLUDE)}`;
-        const items = await fetchZhihuList(page, first, limit, 'followers');
+        const items = await fetchZhihuList(api, first, limit, 'followers');
         return items.map((u, i) => {
             if (!u.url_token || !u.name) {
                 throw new CommandExecutionError('Zhihu followers returned malformed row identity');

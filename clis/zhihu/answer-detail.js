@@ -1,3 +1,4 @@
+import { createZhihuClient } from './api.js';
 import { cli, Strategy } from '@jackwener/opencli/registry';
 import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
 import { normalizeCount, normalizeUnixSeconds, stripHtml } from './answer-normalize.js';
@@ -30,12 +31,15 @@ cli({
     description: '知乎单个回答完整内容（按 answer ID 获取）',
     domain: 'www.zhihu.com',
     strategy: Strategy.COOKIE,
+    browser: false,
+    navigateBefore: false,
     args: [
+        { name: 'profile', valueRequired: true, help: 'Browser profile alias or context ID' },
         { name: 'id', required: true, positional: true, help: 'Answer ID, full Zhihu answer URL, or typed target (answer:<qid>:<aid>)' },
         { name: 'max-content', type: 'int', default: 0, help: 'Optional cap on stripped content length in characters (0 = no truncation, return the full answer)' },
     ],
     columns: ['id', 'author', 'votes', 'comments', 'question_id', 'question_title', 'url', 'created_at', 'updated_at', 'content'],
-    func: async (page, kwargs) => {
+    func: async (kwargs) => {
         const target = parseAnswerTarget(kwargs.id);
         if (!target) {
             throw new ArgumentError(
@@ -56,33 +60,9 @@ cli({
                 'Example: --max-content 2000',
             );
         }
-        // Navigate to the answer page itself: this both seeds the
-        // cookie/anti-bot context and works even when the caller did
-        // not supply the parent question id (Zhihu redirects from
-        // `/answer/<aid>` to the canonical `/question/<qid>/answer/<aid>`).
-        try {
-            await page.goto(`https://www.zhihu.com/answer/${answerId}`);
-        } catch (err) {
-            throw new CommandExecutionError(
-                `Failed to open Zhihu answer ${answerId}: ${err instanceof Error ? err.message : String(err)}`,
-                'Open the answer URL in Chrome and retry after the page is reachable.',
-            );
-        }
-        const currentQuestionId = page.getCurrentUrl
-            ? extractQuestionIdFromAnswerUrl(await page.getCurrentUrl().catch(() => ''))
-            : '';
+        const api = await createZhihuClient(kwargs.profile);
         const apiUrl = `https://www.zhihu.com/api/v4/answers/${answerId}?include=content,voteup_count,comment_count,author,created_time,updated_time,question`;
-        const data = await page.evaluate(`
-      (async () => {
-        const r = await fetch(${JSON.stringify(apiUrl)}, { credentials: 'include' });
-        if (!r.ok) return { __httpError: r.status };
-        try {
-          return await r.json();
-        } catch (error) {
-          return { __malformedJson: error instanceof Error ? error.message : String(error) };
-        }
-      })()
-    `).catch((err) => {
+        const data = await api.get(apiUrl).catch((err) => {
             throw new CommandExecutionError(
                 `Zhihu answer detail request failed: ${err instanceof Error ? err.message : String(err)}`,
                 'Try again later or rerun with -v for more detail.',
@@ -128,12 +108,8 @@ cli({
             );
         }
         const question = data.question || {};
-        // Answer ids and newer question ids can exceed
-        // Number.MAX_SAFE_INTEGER. Prefer ids parsed from user input or
-        // the canonical redirected URL; only fall back to API numeric ids
-        // when no string-safe source is available.
+        // API parsing preserves IDs as strings before they can lose precision.
         const questionId = target.questionId
-            || currentQuestionId
             || extractQuestionIdFromAnswerUrl(question.url)
             || (question.id == null ? '' : String(question.id));
         const stripped = stripHtml(data.content || '');

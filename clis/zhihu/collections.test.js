@@ -1,3 +1,4 @@
+import { createZhihuClient } from './api.js';
 import { describe, expect, it, vi } from 'vitest';
 import { getRegistry } from '@jackwener/opencli/registry';
 import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
@@ -26,7 +27,7 @@ describe('zhihu collections', () => {
 
     const goto = vi.fn().mockResolvedValue(undefined);
     let callCount = 0;
-    const evaluate = vi.fn().mockImplementation(async (js) => {
+    const get = vi.fn().mockImplementation(async (js) => {
       callCount++;
       if (callCount === 1) {
         expect(js).toContain('api/v4/me');
@@ -42,8 +43,8 @@ describe('zhihu collections', () => {
       };
     });
 
-    const page = { goto, evaluate };
-    const result = await cmd.func(page, { limit: 20 });
+    const page = { goto, get };
+    const result = await runCommand(cmd, page, { limit: 20 });
 
     expect(result).toHaveLength(2);
     expect(result[0]).toMatchObject({
@@ -60,13 +61,13 @@ describe('zhihu collections', () => {
       description: '',
       collection_id: '789012',
     });
-    expect(evaluate).toHaveBeenCalledTimes(2);
+    expect(get).toHaveBeenCalledTimes(2);
   });
 
   it('returns list of collections with answer_count fallback', async () => {
     const cmd = getRegistry().get('zhihu/collections');
     let callCount = 0;
-    const evaluate = vi.fn().mockImplementation(async () => {
+    const get = vi.fn().mockImplementation(async () => {
       callCount++;
       if (callCount === 1) {
         return { url_token: 'testuser', id: 'abc123' };
@@ -77,8 +78,8 @@ describe('zhihu collections', () => {
       };
     });
 
-    const page = { goto: vi.fn().mockResolvedValue(undefined), evaluate };
-    const result = await cmd.func(page, { limit: 20 });
+    const page = { goto: vi.fn().mockResolvedValue(undefined), get };
+    const result = await runCommand(cmd, page, { limit: 20 });
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
@@ -93,10 +94,10 @@ describe('zhihu collections', () => {
     const cmd = getRegistry().get('zhihu/collections');
     const page = {
       goto: vi.fn().mockResolvedValue(undefined),
-      evaluate: vi.fn().mockResolvedValue({ __httpError: 401 }),
+      get: vi.fn().mockResolvedValue({ __httpError: 401 }),
     };
 
-    await expect(cmd.func(page, { limit: 20 }))
+    await expect(runCommand(cmd, page, { limit: 20 }))
       .rejects.toBeInstanceOf(AuthRequiredError);
   });
 
@@ -105,21 +106,21 @@ describe('zhihu collections', () => {
     let callCount = 0;
     const page = {
       goto: vi.fn().mockResolvedValue(undefined),
-      evaluate: vi.fn().mockImplementation(async () => {
+      get: vi.fn().mockImplementation(async () => {
         callCount++;
         if (callCount === 1) return { id: 'abc123' };
         return {};
       }),
     };
 
-    await expect(cmd.func(page, { limit: 20 }))
+    await expect(runCommand(cmd, page, { limit: 20 }))
       .rejects.toBeInstanceOf(CommandExecutionError);
   });
 
   it('respects limit parameter', async () => {
     const cmd = getRegistry().get('zhihu/collections');
     let callCount = 0;
-    const evaluate = vi.fn().mockImplementation(async (js) => {
+    const get = vi.fn().mockImplementation(async (js) => {
       callCount++;
       if (callCount === 1) {
         return { url_token: 'testuser', id: 'abc123' };
@@ -131,24 +132,24 @@ describe('zhihu collections', () => {
       };
     });
 
-    const page = { goto: vi.fn().mockResolvedValue(undefined), evaluate };
-    const result = await cmd.func(page, { limit: 10 });
+    const page = { goto: vi.fn().mockResolvedValue(undefined), get };
+    const result = await runCommand(cmd, page, { limit: 10 });
 
     expect(result).toHaveLength(1);
-    expect(evaluate).toHaveBeenCalledTimes(2);
+    expect(get).toHaveBeenCalledTimes(2);
   });
 
   it('rejects invalid limits before navigation', async () => {
     const cmd = getRegistry().get('zhihu/collections');
-    const page = { goto: vi.fn(), evaluate: vi.fn() };
+    const page = { goto: vi.fn(), get: vi.fn() };
 
-    await expect(cmd.func(page, { limit: 0 })).rejects.toBeInstanceOf(ArgumentError);
+    await expect(runCommand(cmd, page, { limit: 0 })).rejects.toBeInstanceOf(ArgumentError);
     expect(page.goto).not.toHaveBeenCalled();
   });
 
   it('paginates collection list and deduplicates by collection id', async () => {
     const cmd = getRegistry().get('zhihu/collections');
-    const evaluate = vi.fn()
+    const get = vi.fn()
       .mockResolvedValueOnce({ url_token: 'testuser', id: 'abc123' })
       .mockResolvedValueOnce({
         data: [{ id: 1, title: 'A', item_count: 1, description: '' }],
@@ -161,22 +162,29 @@ describe('zhihu collections', () => {
         ],
         paging: { totals: 3, is_end: true },
       });
-    const page = { goto: vi.fn().mockResolvedValue(undefined), evaluate };
+    const page = { goto: vi.fn().mockResolvedValue(undefined), get };
 
-    const result = await cmd.func(page, { limit: 2 });
+    const result = await runCommand(cmd, page, { limit: 2 });
 
     expect(result.map((row) => row.title)).toEqual(['A', 'B']);
-    expect(evaluate).toHaveBeenCalledTimes(3);
-    expect(evaluate.mock.calls[2][0]).toContain('offset=1');
+    expect(get).toHaveBeenCalledTimes(3);
+    expect(get.mock.calls[2][0]).toContain('offset=1');
   });
 
   it('throws EmptyResultError when no collections are returned', async () => {
     const cmd = getRegistry().get('zhihu/collections');
-    const evaluate = vi.fn()
+    const get = vi.fn()
       .mockResolvedValueOnce({ url_token: 'testuser', id: 'abc123' })
       .mockResolvedValueOnce({ data: [], paging: { totals: 0, is_end: true } });
-    const page = { goto: vi.fn().mockResolvedValue(undefined), evaluate };
+    const page = { goto: vi.fn().mockResolvedValue(undefined), get };
 
-    await expect(cmd.func(page, { limit: 20 })).rejects.toBeInstanceOf(EmptyResultError);
+    await expect(runCommand(cmd, page, { limit: 20 })).rejects.toBeInstanceOf(EmptyResultError);
   });
 });
+
+vi.mock('./api.js', () => ({ createZhihuClient: vi.fn() }));
+
+async function runCommand(command, api, kwargs) {
+    createZhihuClient.mockResolvedValue(api);
+    return command.func(kwargs);
+}

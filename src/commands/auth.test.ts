@@ -54,6 +54,18 @@ beforeEach(() => {
 });
 
 describe('auth status collection', () => {
+  it.each([false, true])('supports API whoami with the selected profile, full=%s', async (full) => {
+    cli({
+      site: 'api-auth', name: 'whoami', access: 'read', browser: false,
+      args: [{ name: 'profile' }],
+      func: async (kwargs) => ({ logged_in: true, username: kwargs.profile }),
+    });
+    executeCommandMock.mockImplementationOnce(async (cmd, kwargs) => cmd.func(kwargs));
+    const rows = await collectAuthStatus({ sites: 'api-auth', profile: 'edge', full });
+    expect(rows[0]).toMatchObject({ site: 'api-auth', status: 'logged_in', logged_in: true });
+    expect(executeCommandMock.mock.calls[0][0].browser).toBe(false);
+    expect(executeCommandMock.mock.calls[0][1]).toMatchObject({ profile: 'edge' });
+  });
   it('uses quickCheck by default and does not run full whoami', async () => {
     registerWhoami('alpha', { quick: true, quickLoggedIn: true, identity: { username: 'full-alpha' } });
 

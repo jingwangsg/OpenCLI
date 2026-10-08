@@ -1,3 +1,4 @@
+import { createZhihuClient } from './api.js';
 import { describe, expect, it, vi } from 'vitest';
 import { getRegistry } from '@jackwener/opencli/registry';
 import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
@@ -6,7 +7,7 @@ import './answer-comments.js';
 
 const command = () => getRegistry().get('zhihu/answer-comments');
 const args = (overrides = {}) => ({
-    id: '20',
+    id: 'answer:10:20',
     limit: 1,
     'replies-limit': 0,
     order: 'score',
@@ -17,7 +18,7 @@ function pageWith(resolve) {
     return {
         goto: vi.fn().mockResolvedValue(undefined),
         getCurrentUrl: vi.fn().mockResolvedValue('https://www.zhihu.com/question/10/answer/20'),
-        evaluate: vi.fn().mockImplementation((_fn, url) => resolve(url)),
+        get: vi.fn().mockImplementation((url) => url.includes('/api/v4/answers/') ? { question: { id: '10' } } : resolve(url)),
     };
 }
 
@@ -86,7 +87,7 @@ describe('zhihu answer-comments', () => {
             };
         });
 
-        const rows = await command().func(page, args({
+        const rows = await runCommand(command(), page, args({
             id: 'answer:10:20',
             'replies-limit': 3,
         }));
@@ -98,7 +99,7 @@ describe('zhihu answer-comments', () => {
             ['103', '102', 3, 1, 3],
         ]);
         expect(rows[2]).toMatchObject({ author: 'author 102', reply_to: 'author 101', content: 'nested' });
-        expect(page.evaluate).toHaveBeenCalledTimes(2);
+        expect(page.get).toHaveBeenCalledTimes(2);
     });
 
     it('maps latest to order_by=ts and sends no child request when replies-limit is zero', async () => {
@@ -109,9 +110,9 @@ describe('zhihu answer-comments', () => {
                 paging: { is_end: true },
             };
         });
-        const rows = await command().func(page, args({ order: 'latest' }));
+        const rows = await runCommand(command(), page, args({ order: 'latest' }));
         expect(rows.map((row) => row.id)).toEqual(['100']);
-        expect(page.evaluate).toHaveBeenCalledTimes(1);
+        expect(page.get).toHaveBeenCalledTimes(1);
     });
 
     it('counts unique roots toward limit and idempotently removes equivalent page overlap', async () => {
@@ -131,9 +132,9 @@ describe('zhihu answer-comments', () => {
                 paging: { is_end: true },
             }));
 
-        const rows = await command().func(page, args({ limit: 3 }));
+        const rows = await runCommand(command(), page, args({ limit: 3 }));
         expect(rows.map((row) => row.id)).toEqual(['100', '101', '102']);
-        expect(page.evaluate).toHaveBeenCalledTimes(2);
+        expect(page.get).toHaveBeenCalledTimes(2);
     });
 
     it('rejects same-id root overlap when normalized content or role identity conflicts', async () => {
@@ -150,7 +151,7 @@ describe('zhihu answer-comments', () => {
                 paging: { is_end: true },
             }));
 
-        await expect(command().func(page, args({ limit: 2 }))).rejects.toBeInstanceOf(CommandExecutionError);
+        await expect(runCommand(command(), page, args({ limit: 2 }))).rejects.toBeInstanceOf(CommandExecutionError);
     });
 
     it('counts unique replies toward replies-limit and removes equivalent child overlap', async () => {
@@ -181,9 +182,9 @@ describe('zhihu answer-comments', () => {
             };
         });
 
-        const rows = await command().func(page, args({ 'replies-limit': 3 }));
+        const rows = await runCommand(command(), page, args({ 'replies-limit': 3 }));
         expect(rows.map((row) => row.id)).toEqual(['100', '101', '102', '103']);
-        expect(page.evaluate).toHaveBeenCalledTimes(3);
+        expect(page.get).toHaveBeenCalledTimes(3);
     });
 
     it('rejects conflicting child overlap and wrong root provenance', async () => {
@@ -203,13 +204,13 @@ describe('zhihu answer-comments', () => {
                 data: [child('101', '100', '100', 'changed')],
                 paging: { is_end: true },
             }));
-        await expect(command().func(conflictingOverlap, args({ 'replies-limit': 2 })))
+        await expect(runCommand(command(), conflictingOverlap, args({ 'replies-limit': 2 })))
             .rejects.toBeInstanceOf(CommandExecutionError);
 
         const wrongRoot = pageWith(async (url) => url.includes('/root_comment')
             ? { data: [root('100', 'root', { child_comment_count: 1 })], paging: { is_end: true } }
             : { data: [child('101', '999', '100')], paging: { is_end: true } });
-        await expect(command().func(wrongRoot, args({ 'replies-limit': 1 })))
+        await expect(runCommand(command(), wrongRoot, args({ 'replies-limit': 1 })))
             .rejects.toBeInstanceOf(CommandExecutionError);
     });
 
@@ -223,7 +224,7 @@ describe('zhihu answer-comments', () => {
                 data: [root('100')],
                 paging: { is_end: false, next },
             }));
-            await expect(command().func(page, args({ limit: 2 }))).rejects.toBeInstanceOf(CommandExecutionError);
+            await expect(runCommand(command(), page, args({ limit: 2 }))).rejects.toBeInstanceOf(CommandExecutionError);
         }
 
         const childWrongRoot = pageWith(async (url) => url.includes('/root_comment')
@@ -235,7 +236,7 @@ describe('zhihu answer-comments', () => {
                     next: 'https://www.zhihu.com/api/v4/comment_v5/comment/999/child_comment?limit=20&offset=x',
                 },
             });
-        await expect(command().func(childWrongRoot, args({ 'replies-limit': 2 })))
+        await expect(runCommand(command(), childWrongRoot, args({ 'replies-limit': 2 })))
             .rejects.toBeInstanceOf(CommandExecutionError);
     });
 
@@ -247,7 +248,7 @@ describe('zhihu answer-comments', () => {
                 next: 'https://www.zhihu.com/api/v4/comment_v5/answers/20/root_comment?order_by=score&limit=20&offset=',
             },
         }));
-        await expect(command().func(repeated, args({ limit: 2 }))).rejects.toBeInstanceOf(CommandExecutionError);
+        await expect(runCommand(command(), repeated, args({ limit: 2 }))).rejects.toBeInstanceOf(CommandExecutionError);
 
         let offset = 0;
         const stalled = pageWith(async () => {
@@ -260,39 +261,39 @@ describe('zhihu answer-comments', () => {
                 },
             };
         });
-        await expect(command().func(stalled, args({ limit: 2 }))).rejects.toBeInstanceOf(CommandExecutionError);
-        expect(stalled.evaluate).toHaveBeenCalledTimes(3);
+        await expect(runCommand(command(), stalled, args({ limit: 2 }))).rejects.toBeInstanceOf(CommandExecutionError);
+        expect(stalled.get).toHaveBeenCalledTimes(3);
     });
 
     it('distinguishes auth, risk control, not found, empty, and malformed responses', async () => {
-        await expect(command().func(pageWith(async () => ({ __httpStatus: 401 })), args()))
+        await expect(runCommand(command(), pageWith(async () => ({ __httpStatus: 401 })), args()))
             .rejects.toBeInstanceOf(AuthRequiredError);
-        await expect(command().func(pageWith(async () => ({
+        await expect(runCommand(command(), pageWith(async () => ({
             __httpStatus: 403,
             __errorCode: 40362,
             __errorMessage: 'risk',
         })), args())).rejects.toBeInstanceOf(CommandExecutionError);
-        await expect(command().func(pageWith(async () => ({
+        await expect(runCommand(command(), pageWith(async () => ({
             __httpStatus: 403,
             __errorCode: 40353,
             __needLogin: true,
         })), args())).rejects.toBeInstanceOf(AuthRequiredError);
-        await expect(command().func(pageWith(async () => ({ __httpStatus: 404 })), args()))
+        await expect(runCommand(command(), pageWith(async () => ({ __httpStatus: 404 })), args()))
             .rejects.toBeInstanceOf(EmptyResultError);
-        await expect(command().func(pageWith(async () => ({ data: [], paging: { is_end: true } })), args()))
+        await expect(runCommand(command(), pageWith(async () => ({ data: [], paging: { is_end: true } })), args()))
             .rejects.toBeInstanceOf(EmptyResultError);
-        await expect(command().func(pageWith(async () => ({ data: {}, paging: { is_end: true } })), args()))
+        await expect(runCommand(command(), pageWith(async () => ({ data: {}, paging: { is_end: true } })), args()))
             .rejects.toBeInstanceOf(CommandExecutionError);
-        await expect(command().func(pageWith(async () => ({ data: [], paging: {} })), args()))
+        await expect(runCommand(command(), pageWith(async () => ({ data: [], paging: {} })), args()))
             .rejects.toBeInstanceOf(CommandExecutionError);
     });
 
     it('rejects invalid inputs before navigation', async () => {
-        const page = { goto: vi.fn(), evaluate: vi.fn() };
-        await expect(command().func(page, args({ id: 'invalid' }))).rejects.toBeInstanceOf(ArgumentError);
-        await expect(command().func(page, args({ limit: 0 }))).rejects.toBeInstanceOf(ArgumentError);
-        await expect(command().func(page, args({ 'replies-limit': 101 }))).rejects.toBeInstanceOf(ArgumentError);
-        await expect(command().func(page, args({ order: 'normal' }))).rejects.toBeInstanceOf(ArgumentError);
+        const page = { goto: vi.fn(), get: vi.fn() };
+        await expect(runCommand(command(), page, args({ id: 'invalid' }))).rejects.toBeInstanceOf(ArgumentError);
+        await expect(runCommand(command(), page, args({ limit: 0 }))).rejects.toBeInstanceOf(ArgumentError);
+        await expect(runCommand(command(), page, args({ 'replies-limit': 101 }))).rejects.toBeInstanceOf(ArgumentError);
+        await expect(runCommand(command(), page, args({ order: 'normal' }))).rejects.toBeInstanceOf(ArgumentError);
         expect(page.goto).not.toHaveBeenCalled();
     });
 });
@@ -342,3 +343,10 @@ describe('zhihu answer-comments graph', () => {
         )).toThrow(CommandExecutionError);
     });
 });
+
+vi.mock('./api.js', () => ({ createZhihuClient: vi.fn() }));
+
+async function runCommand(command, api, kwargs) {
+    createZhihuClient.mockResolvedValue(api);
+    return command.func(kwargs);
+}

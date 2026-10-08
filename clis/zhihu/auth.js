@@ -1,5 +1,6 @@
 import { AuthRequiredError, CommandExecutionError } from '@jackwener/opencli/errors';
 import { registerSiteAuthCommands } from '../_shared/site-auth.js';
+import { createZhihuClient, syncZhihuSession } from './api.js';
 
 async function hasZhihuAuthCookie(page) {
   const cookies = await page.getCookies({ url: 'https://www.zhihu.com' });
@@ -36,6 +37,7 @@ async function verifyZhihuIdentity(page) {
   if (!data.url_token) {
     throw new AuthRequiredError('www.zhihu.com', 'Zhihu /api/v4/me returned no url_token — anonymous session');
   }
+  if (page.contextId) await syncZhihuSession(page);
   return {
     url_token: String(data.url_token),
     name: String(data.name ?? ''),
@@ -50,6 +52,12 @@ registerSiteAuthCommands({
   columns: ['url_token', 'name', 'uid'],
   quickCheck: hasZhihuAuthCookie,
   verify: verifyZhihuIdentity,
+  apiVerify: async (kwargs) => {
+    const api = await createZhihuClient(kwargs.profile);
+    const data = await api.get('https://www.zhihu.com/api/v4/me?include=url_token');
+    if (!data?.url_token) throw new AuthRequiredError('www.zhihu.com', 'Zhihu API session is no longer authenticated; run zhihu auth-sync');
+    return { url_token: String(data.url_token), name: String(data.name || ''), uid: String(data.uid || data.id || '') };
+  },
   poll: async (page) => {
     if (!await hasZhihuAuthCookie(page)) {
       throw new AuthRequiredError('www.zhihu.com', 'Waiting for Zhihu z_c0 cookie');

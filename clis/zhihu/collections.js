@@ -1,3 +1,4 @@
+import { createZhihuClient } from './api.js';
 import { cli, Strategy } from '@jackwener/opencli/registry';
 import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
 import { log } from '@jackwener/opencli/logger';
@@ -10,14 +11,8 @@ function validatePositiveInt(value, name) {
   return n;
 }
 
-async function fetchJson(page, url, errorLabel) {
-  const data = await page.evaluate(`
-    (async () => {
-      const r = await fetch(${JSON.stringify(url)}, { credentials: 'include' });
-      if (!r.ok) return { __httpError: r.status };
-      return await r.json();
-    })()
-  `);
+async function fetchJson(api, url, errorLabel) {
+  const data = await api.get(url);
 
   if (!data || data.__httpError) {
     const status = data?.__httpError;
@@ -43,19 +38,19 @@ cli({
   description: '知乎收藏夹列表（需要登录）',
   domain: 'www.zhihu.com',
   strategy: Strategy.COOKIE,
-  browser: true,
+  browser: false,
+  navigateBefore: false,
   args: [
+        { name: 'profile', valueRequired: true, help: 'Browser profile alias or context ID' },
     { name: 'limit', type: 'int', default: 20, help: '每页数量（最大 20）' },
   ],
   columns: ['rank', 'title', 'item_count', 'description', 'collection_id'],
-  func: async (page, kwargs) => {
+  func: async (kwargs) => {
     const { limit = 20 } = kwargs;
     const requestedLimit = validatePositiveInt(limit, 'limit');
 
-    // 先访问知乎主页建立 session
-    await page.goto('https://www.zhihu.com');
-    // 获取当前用户的 url_token
-    const meData = await fetchJson(page, 'https://www.zhihu.com/api/v4/me?include=url_token', 'Zhihu user info request');
+        const api = await createZhihuClient(kwargs.profile);
+    const meData = await fetchJson(api, 'https://www.zhihu.com/api/v4/me?include=url_token', 'Zhihu user info request');
 
     const urlToken = meData.url_token;
     if (!urlToken) {
@@ -72,7 +67,7 @@ cli({
     for (let pageIndex = 0; pageIndex < maxPages && collected.length < requestedLimit; pageIndex += 1) {
       const currentFetchLimit = Math.min(pageLimit, requestedLimit - collected.length);
       const url = `https://www.zhihu.com/api/v4/people/${urlToken}/collections?include=data%5B*%5D.updated_time&offset=${offset}&limit=${currentFetchLimit}`;
-      const data = await fetchJson(page, url, 'Zhihu favorite collections request');
+      const data = await fetchJson(api, url, 'Zhihu favorite collections request');
       const items = Array.isArray(data.data) ? data.data : [];
       const paging = data.paging || {};
       totals = Number(paging.totals || totals || 0);

@@ -1,3 +1,4 @@
+import { createZhihuClient } from './api.js';
 import { cli, Strategy } from '@jackwener/opencli/registry';
 import { AuthRequiredError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
 import { parseZhihuUser } from './user-arg.js';
@@ -12,25 +13,18 @@ cli({
     description: '知乎用户主页资料（粉丝/关注/回答/文章/获赞数）',
     domain: 'www.zhihu.com',
     strategy: Strategy.COOKIE,
+    browser: false,
+    navigateBefore: false,
     args: [
+        { name: 'profile', valueRequired: true, help: 'Browser profile alias or context ID' },
         { name: 'user', type: 'string', required: true, positional: true, help: 'User url_token or people URL, e.g. wen-jie-16-47' },
     ],
     columns: ['url_token', 'name', 'headline', 'followers', 'following', 'answers', 'articles', 'voteup', 'url'],
-    func: async (page, kwargs) => {
+    func: async (kwargs) => {
         const slug = parseZhihuUser(kwargs.user);
-        await page.goto('https://www.zhihu.com');
+        const api = await createZhihuClient(kwargs.profile);
         const apiUrl = `https://www.zhihu.com/api/v4/members/${encodeURIComponent(slug)}?include=${encodeURIComponent(INCLUDE)}`;
-        const data = unwrapEvaluateResult(await page.evaluate(`
-      (async () => {
-        try {
-          const r = await fetch(${JSON.stringify(apiUrl)}, { credentials: 'include' });
-          if (!r.ok) return { __httpError: r.status };
-          return await r.json();
-        } catch (err) {
-          return { __fetchError: err?.message || String(err) };
-        }
-      })()
-    `));
+        const data = unwrapEvaluateResult(await api.get(apiUrl));
         if (!data || typeof data !== 'object' || Array.isArray(data) || data.__httpError || data.__fetchError) {
             const status = data?.__httpError;
             if (status === 401 || status === 403) {

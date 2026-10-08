@@ -131,7 +131,7 @@ function authWhoamiCommands(): CliCommand[] {
     .filter((cmd) => {
       if (seen.has(cmd)) return false;
       seen.add(cmd);
-      return cmd.name === 'whoami' && cmd.browser === true && cmd.access === 'read';
+      return cmd.name === 'whoami' && cmd.access === 'read';
     })
     .sort((a, b) => a.site.localeCompare(b.site));
 }
@@ -153,8 +153,9 @@ function withTimeoutArg(cmd: CliCommand, timeoutSeconds: number): CliCommand {
   };
 }
 
-function quickCheckCommand(cmd: CliCommand, timeoutSeconds: number): BrowserCliCommand | null {
-  if (cmd.browser !== true || typeof cmd.authStatus?.quickCheck !== 'function') return null;
+function quickCheckCommand(cmd: CliCommand, timeoutSeconds: number): CliCommand | null {
+  if (cmd.browser === false) return withTimeoutArg(cmd, timeoutSeconds);
+  if (typeof cmd.authStatus?.quickCheck !== 'function') return null;
   return withTimeoutArg({
     ...cmd,
     func: cmd.authStatus.quickCheck,
@@ -213,7 +214,7 @@ function rowForError(site: string, checked: AuthStatusMode, error: unknown): Aut
 }
 
 function refreshCommand(cmd: CliCommand, timeoutSeconds: number): BrowserCliCommand | null {
-  if (cmd.browser !== true) return null;
+  if (cmd.browser !== true && typeof cmd.authStatus?.quickCheck !== 'function' && typeof cmd.authStatus?.refresh !== 'function') return null;
   let refreshFunc = cmd.authStatus?.refresh;
   if (typeof refreshFunc !== 'function') {
     const quickCheck = cmd.authStatus?.quickCheck;
@@ -233,6 +234,7 @@ function refreshCommand(cmd: CliCommand, timeoutSeconds: number): BrowserCliComm
   }
   return withTimeoutArg({
     ...cmd,
+    browser: true,
     func: refreshFunc,
     navigateBefore: false,
     siteSession: 'persistent',
@@ -284,7 +286,7 @@ async function runQuick(cmd: CliCommand, opts: { timeoutSeconds: number; profile
   }
 
   try {
-    const result = await executeCommand(quickCmd, { timeout: opts.timeoutSeconds } as CommandArgs, false, {
+    const result = await executeCommand(quickCmd, { timeout: opts.timeoutSeconds, ...(quickCmd.browser === false && opts.profile ? { profile: opts.profile } : {}) } as CommandArgs, false, {
       siteSession: 'ephemeral',
       keepTab: 'false',
       windowMode: 'background',
@@ -314,7 +316,7 @@ async function runFull(cmd: CliCommand, opts: { timeoutSeconds: number; profile?
   const loaded = await loadLazyCommand(cmd);
   const fullCmd = withTimeoutArg(loaded, opts.timeoutSeconds);
   try {
-    const result = await executeCommand(fullCmd, { timeout: opts.timeoutSeconds } as CommandArgs, false, {
+    const result = await executeCommand(fullCmd, { timeout: opts.timeoutSeconds, ...(fullCmd.browser === false && opts.profile ? { profile: opts.profile } : {}) } as CommandArgs, false, {
       siteSession: 'ephemeral',
       keepTab: 'false',
       windowMode: 'background',

@@ -54,10 +54,12 @@ export function registerSiteAuthCommands(config) {
     description: config.whoamiDescription ?? `Show the current logged-in ${config.site} account`,
     domain: config.domain,
     strategy: Strategy.COOKIE,
-    browser: true,
+    browser: typeof config.apiVerify === 'function' ? false : true,
     navigateBefore: false,
     siteSession: 'persistent',
-    args: [],
+    args: typeof config.apiVerify === 'function'
+      ? [{ name: 'profile', valueRequired: true, help: 'Browser profile alias or context ID' }]
+      : [],
     columns: commandColumns(config),
     authStatus: {
       ...(typeof config.quickCheck === 'function'
@@ -67,7 +69,9 @@ export function registerSiteAuthCommands(config) {
         ? { refresh: async (page, kwargs) => normalizeRefreshResult(await config.refresh(page, kwargs)) }
         : {}),
     },
-    func: async (page) => tryProbe(config, page, 'identity'),
+    func: typeof config.apiVerify === 'function'
+      ? async (kwargs) => normalizeIdentity(config.site, await config.apiVerify(kwargs))
+      : async (page) => tryProbe(config, page, 'identity'),
   });
 
   cli({

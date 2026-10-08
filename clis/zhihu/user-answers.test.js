@@ -1,3 +1,4 @@
+import { createZhihuClient } from './api.js';
 import { describe, expect, it, vi } from 'vitest';
 import { getRegistry } from '@jackwener/opencli/registry';
 import { AuthRequiredError, CliError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
@@ -7,7 +8,7 @@ describe('zhihu user-answers', () => {
     it('maps a user answers list to rows', async () => {
         const cmd = getRegistry().get('zhihu/user-answers');
         expect(cmd?.func).toBeTypeOf('function');
-        const evaluate = vi.fn().mockImplementation(async (js) => {
+        const get = vi.fn().mockImplementation(async (js) => {
             expect(js).toContain('/api/v4/members/wen-jie-16-47/answers');
             return {
                 data: [
@@ -17,7 +18,7 @@ describe('zhihu user-answers', () => {
                 paging: { is_end: true },
             };
         });
-        await expect(cmd.func({ goto: vi.fn().mockResolvedValue(undefined), evaluate }, { user: 'wen-jie-16-47', limit: 2 })).resolves.toEqual([
+        await expect(runCommand(cmd, { goto: vi.fn().mockResolvedValue(undefined), get }, { user: 'wen-jie-16-47', limit: 2 })).resolves.toEqual([
             { rank: 1, question: 'Q1', votes: 10, comments: 12, created: 1780888788, url: 'https://www.zhihu.com/question/q1/answer/a1' },
             { rank: 2, question: 'Q2', votes: 3, comments: 0, created: 0, url: 'https://www.zhihu.com/question/q2/answer/a2' },
         ]);
@@ -25,30 +26,30 @@ describe('zhihu user-answers', () => {
 
     it('maps 403 to AuthRequiredError', async () => {
         const cmd = getRegistry().get('zhihu/user-answers');
-        const page = { goto: vi.fn().mockResolvedValue(undefined), evaluate: vi.fn().mockResolvedValue({ __httpError: 403 }) };
-        await expect(cmd.func(page, { user: 'foo', limit: 2 })).rejects.toBeInstanceOf(AuthRequiredError);
+        const page = { goto: vi.fn().mockResolvedValue(undefined), get: vi.fn().mockResolvedValue({ __httpError: 403 }) };
+        await expect(runCommand(cmd, page, { user: 'foo', limit: 2 })).rejects.toBeInstanceOf(AuthRequiredError);
     });
 
     it('unwraps Browser Bridge envelopes and fails typed on malformed answer identity', async () => {
         const cmd = getRegistry().get('zhihu/user-answers');
         const page = {
             goto: vi.fn().mockResolvedValue(undefined),
-            evaluate: vi.fn().mockResolvedValue({ session: {}, data: { data: [{ id: 'a1', question: { title: 'missing id' } }], paging: { is_end: true } } }),
+            get: vi.fn().mockResolvedValue({ session: {}, data: { data: [{ id: 'a1', question: { title: 'missing id' } }], paging: { is_end: true } } }),
         };
-        await expect(cmd.func(page, { user: 'foo', limit: 2 })).rejects.toBeInstanceOf(CommandExecutionError);
+        await expect(runCommand(cmd, page, { user: 'foo', limit: 2 })).rejects.toBeInstanceOf(CommandExecutionError);
     });
 
     it('throws EmptyResultError for valid empty answer lists', async () => {
         const cmd = getRegistry().get('zhihu/user-answers');
-        const page = { goto: vi.fn().mockResolvedValue(undefined), evaluate: vi.fn().mockResolvedValue({ data: [], paging: { is_end: true } }) };
-        await expect(cmd.func(page, { user: 'foo', limit: 2 })).rejects.toBeInstanceOf(EmptyResultError);
+        const page = { goto: vi.fn().mockResolvedValue(undefined), get: vi.fn().mockResolvedValue({ data: [], paging: { is_end: true } }) };
+        await expect(runCommand(cmd, page, { user: 'foo', limit: 2 })).rejects.toBeInstanceOf(EmptyResultError);
     });
 
     it('rejects pagination next URLs that drift to another member endpoint', async () => {
         const cmd = getRegistry().get('zhihu/user-answers');
         const page = {
             goto: vi.fn().mockResolvedValue(undefined),
-            evaluate: vi.fn().mockResolvedValue({
+            get: vi.fn().mockResolvedValue({
                 data: [{ id: 'a1', question: { id: 'q1', title: 'Q1' } }],
                 paging: {
                     is_end: false,
@@ -56,12 +57,12 @@ describe('zhihu user-answers', () => {
                 },
             }),
         };
-        await expect(cmd.func(page, { user: 'foo', limit: 2 })).rejects.toBeInstanceOf(CommandExecutionError);
+        await expect(runCommand(cmd, page, { user: 'foo', limit: 2 })).rejects.toBeInstanceOf(CommandExecutionError);
     });
 
     it('follows Zhihu http next URLs by upgrading them to https', async () => {
         const cmd = getRegistry().get('zhihu/user-answers');
-        const evaluate = vi.fn()
+        const get = vi.fn()
             .mockResolvedValueOnce({
                 data: [{ id: 'a1', question: { id: 'q1', title: 'Q1' } }],
                 paging: {
@@ -73,33 +74,40 @@ describe('zhihu user-answers', () => {
                 data: [{ id: 'a2', question: { id: 'q2', title: 'Q2' } }],
                 paging: { is_end: true },
             });
-        await expect(cmd.func({ goto: vi.fn().mockResolvedValue(undefined), evaluate }, { user: 'foo', limit: 2 })).resolves.toEqual([
+        await expect(runCommand(cmd, { goto: vi.fn().mockResolvedValue(undefined), get }, { user: 'foo', limit: 2 })).resolves.toEqual([
             { rank: 1, question: 'Q1', votes: 0, comments: 0, created: 0, url: 'https://www.zhihu.com/question/q1/answer/a1' },
             { rank: 2, question: 'Q2', votes: 0, comments: 0, created: 0, url: 'https://www.zhihu.com/question/q2/answer/a2' },
         ]);
-        expect(evaluate.mock.calls[1][0]).toContain('https://www.zhihu.com/api/v4/members/foo/answers?offset=1');
+        expect(get.mock.calls[1][0]).toContain('https://www.zhihu.com/api/v4/members/foo/answers?offset=1');
     });
 
     it('does not validate paging.next after the requested limit is reached', async () => {
         const cmd = getRegistry().get('zhihu/user-answers');
-        const evaluate = vi.fn().mockResolvedValue({
+        const get = vi.fn().mockResolvedValue({
             data: [{ id: 'a1', question: { id: 'q1', title: 'Q1' } }],
             paging: {
                 is_end: false,
                 next: 'http://evil.example/api/v4/members/foo/answers?offset=1',
             },
         });
-        await expect(cmd.func({ goto: vi.fn().mockResolvedValue(undefined), evaluate }, { user: 'foo', limit: 1 })).resolves.toEqual([
+        await expect(runCommand(cmd, { goto: vi.fn().mockResolvedValue(undefined), get }, { user: 'foo', limit: 1 })).resolves.toEqual([
             { rank: 1, question: 'Q1', votes: 0, comments: 0, created: 0, url: 'https://www.zhihu.com/question/q1/answer/a1' },
         ]);
-        expect(evaluate).toHaveBeenCalledTimes(1);
+        expect(get).toHaveBeenCalledTimes(1);
     });
 
     it('rejects invalid limits before navigation', async () => {
         const cmd = getRegistry().get('zhihu/user-answers');
-        const page = { goto: vi.fn(), evaluate: vi.fn() };
-        await expect(cmd.func(page, { user: 'foo', limit: 0 })).rejects.toBeInstanceOf(CliError);
-        await expect(cmd.func(page, { user: 'foo', limit: '1e2' })).rejects.toBeInstanceOf(CliError);
+        const page = { goto: vi.fn(), get: vi.fn() };
+        await expect(runCommand(cmd, page, { user: 'foo', limit: 0 })).rejects.toBeInstanceOf(CliError);
+        await expect(runCommand(cmd, page, { user: 'foo', limit: '1e2' })).rejects.toBeInstanceOf(CliError);
         expect(page.goto).not.toHaveBeenCalled();
     });
 });
+
+vi.mock('./api.js', () => ({ createZhihuClient: vi.fn() }));
+
+async function runCommand(command, api, kwargs) {
+    createZhihuClient.mockResolvedValue(api);
+    return command.func(kwargs);
+}

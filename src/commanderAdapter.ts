@@ -85,6 +85,7 @@ export function registerCommandToProgram(siteCmd: Command, cmd: CliCommand): voi
     // ── Execute + render ────────────────────────────────────────────────
     try {
       // ── Collect kwargs ────────────────────────────────────────────────
+      const globals = typeof subCmd.optsWithGlobals === 'function' ? subCmd.optsWithGlobals() as Record<string, unknown> : {};
       const rawKwargs: Record<string, unknown> = {};
       for (let i = 0; i < positionalArgs.length; i++) {
         const v = actionArgs[i];
@@ -93,7 +94,8 @@ export function registerCommandToProgram(siteCmd: Command, cmd: CliCommand): voi
       for (const arg of cmd.args) {
         if (arg.positional) continue;
         const camelName = arg.name.replace(/-([a-z])/g, (_m, ch: string) => ch.toUpperCase());
-        const v = optionsRecord[arg.name] ?? optionsRecord[camelName];
+        const v = optionsRecord[arg.name] ?? optionsRecord[camelName]
+          ?? (arg.name === 'profile' ? globals.profile : undefined);
         if (v !== undefined) rawKwargs[arg.name] = v;
       }
       const optionSources: Record<string, string> = {};
@@ -112,7 +114,6 @@ export function registerCommandToProgram(siteCmd: Command, cmd: CliCommand): voi
       let format = typeof optionsRecord.format === 'string' ? optionsRecord.format : 'table';
       const formatExplicit = subCmd.getOptionValueSource('format') === 'cli';
       if (verbose) process.env.OPENCLI_VERBOSE = '1';
-      const globals = typeof subCmd.optsWithGlobals === 'function' ? subCmd.optsWithGlobals() as Record<string, unknown> : {};
       const result = await executeCommand(cmd, kwargs, verbose, {
         prepared: true,
         ...(typeof globals.profile === 'string' && globals.profile.trim() ? { profile: globals.profile.trim() } : {}),

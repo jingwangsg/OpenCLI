@@ -86,23 +86,13 @@ function sameZhihuApiPath(a, b) {
  * to `limit` raw items, following `paging.next`. `label` is used in error
  * messages. Returns the raw item array; callers map it to rows.
  */
-export async function fetchZhihuList(page, firstUrl, limit, label) {
+export async function fetchZhihuList(api, firstUrl, limit, label) {
     const items = [];
     const visited = new Set();
     let url = firstUrl;
     while (url && items.length < limit && !visited.has(url)) {
         visited.add(url);
-        const data = requireZhihuListPayload(await page.evaluate(`
-      (async () => {
-        try {
-          const r = await fetch(${JSON.stringify(url)}, { credentials: 'include' });
-          if (!r.ok) return { __httpError: r.status };
-          return await r.json();
-        } catch (err) {
-          return { __fetchError: err?.message || String(err) };
-        }
-      })()
-    `), label, url);
+        const data = requireZhihuListPayload(await api.get(url), label, url);
         for (const item of data.data) {
             items.push(item);
             if (items.length >= limit) break;

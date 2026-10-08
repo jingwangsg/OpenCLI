@@ -1,3 +1,4 @@
+import { createZhihuClient } from './api.js';
 import { describe, expect, it, vi } from 'vitest';
 import { getRegistry } from '@jackwener/opencli/registry';
 import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
@@ -14,10 +15,9 @@ describe('zhihu search', () => {
         const cmd = getRegistry().get('zhihu/search');
         expect(cmd?.func).toBeTypeOf('function');
         const goto = vi.fn().mockResolvedValue(undefined);
-        const evaluate = vi.fn().mockImplementation(async (js) => {
+        const get = vi.fn().mockImplementation(async (js) => {
             expect(js).toContain('/api/v4/search_v3');
             expect(js).toContain('limit=20');
-            expect(js).toContain("credentials: 'include'");
             return {
                 data: [
                     {
@@ -53,8 +53,8 @@ describe('zhihu search', () => {
                 paging: { is_end: true },
             };
         });
-        const page = { goto, evaluate };
-        await expect(cmd.func(page, { query: 'codex', limit: 2 })).resolves.toEqual([
+        const page = { goto, get };
+        await expect(runCommand(cmd, page, { query: 'codex', limit: 2 })).resolves.toEqual([
             {
                 rank: 1,
                 title: 'Codex "question"',
@@ -72,15 +72,15 @@ describe('zhihu search', () => {
                 url: 'https://zhuanlan.zhihu.com/p/p1',
             },
         ]);
-        expect(goto).toHaveBeenCalledWith('https://www.zhihu.com');
-        expect(evaluate).toHaveBeenCalledTimes(1);
+        expect(goto).not.toHaveBeenCalled();
+        expect(get).toHaveBeenCalledTimes(1);
     });
 
     it('follows paging.next until the requested limit is reached', async () => {
         const cmd = getRegistry().get('zhihu/search');
         const page = {
             goto: vi.fn().mockResolvedValue(undefined),
-            evaluate: vi.fn()
+            get: vi.fn()
                 .mockResolvedValueOnce({
                     data: [
                         { type: 'search_result', object: { id: 'a1', type: 'answer', question: { id: 'q1', name: 'first' } } },
@@ -99,20 +99,20 @@ describe('zhihu search', () => {
                     paging: { is_end: true },
                 }),
         };
-        await expect(cmd.func(page, { query: 'codex', limit: 3 })).resolves.toEqual([
+        await expect(runCommand(cmd, page, { query: 'codex', limit: 3 })).resolves.toEqual([
             { rank: 1, title: 'first', type: 'answer', author: '', votes: 0, url: 'https://www.zhihu.com/question/q1/answer/a1' },
             { rank: 2, title: 'second', type: 'answer', author: '', votes: 0, url: 'https://www.zhihu.com/question/q2/answer/a2' },
             { rank: 3, title: 'third', type: 'question', author: '', votes: 0, url: 'https://www.zhihu.com/question/q3' },
         ]);
-        expect(page.evaluate).toHaveBeenCalledTimes(2);
-        expect(page.evaluate.mock.calls[1][0]).toContain('https://www.zhihu.com/api/v4/search_v3?offset=20&q=codex');
+        expect(page.get).toHaveBeenCalledTimes(2);
+        expect(page.get.mock.calls[1][0]).toContain('https://www.zhihu.com/api/v4/search_v3?offset=20&q=codex');
     });
 
     it('filters by result type', async () => {
         const cmd = getRegistry().get('zhihu/search');
         const page = {
             goto: vi.fn().mockResolvedValue(undefined),
-            evaluate: vi.fn().mockResolvedValue({
+            get: vi.fn().mockResolvedValue({
                 data: [
                     { type: 'search_result', object: { id: 'a1', type: 'answer' } },
                     { type: 'search_result', object: { id: 'p1', type: 'article', title: 'article' } },
@@ -120,7 +120,7 @@ describe('zhihu search', () => {
                 paging: { is_end: true },
             }),
         };
-        await expect(cmd.func(page, { query: 'codex', limit: 2, type: 'article' })).resolves.toEqual([
+        await expect(runCommand(cmd, page, { query: 'codex', limit: 2, type: 'article' })).resolves.toEqual([
             { rank: 1, title: 'article', type: 'article', author: '', votes: 0, url: 'https://zhuanlan.zhihu.com/p/p1' },
         ]);
     });
@@ -129,30 +129,30 @@ describe('zhihu search', () => {
         const cmd = getRegistry().get('zhihu/search');
         const page = {
             goto: vi.fn().mockResolvedValue(undefined),
-            evaluate: vi.fn().mockResolvedValue({ __httpError: 403 }),
+            get: vi.fn().mockResolvedValue({ __httpError: 403 }),
         };
-        await expect(cmd.func(page, { query: 'codex', limit: 3 })).rejects.toBeInstanceOf(AuthRequiredError);
+        await expect(runCommand(cmd, page, { query: 'codex', limit: 3 })).rejects.toBeInstanceOf(AuthRequiredError);
     });
 
     it('preserves non-auth fetch failures as typed execution errors', async () => {
         const cmd = getRegistry().get('zhihu/search');
         const page = {
             goto: vi.fn().mockResolvedValue(undefined),
-            evaluate: vi.fn().mockResolvedValue({ __httpError: 500 }),
+            get: vi.fn().mockResolvedValue({ __httpError: 500 }),
         };
-        await expect(cmd.func(page, { query: 'codex', limit: 3 }))
+        await expect(runCommand(cmd, page, { query: 'codex', limit: 3 }))
             .rejects.toBeInstanceOf(CommandExecutionError);
     });
 
     it('rejects invalid input before navigation', async () => {
         const cmd = getRegistry().get('zhihu/search');
-        const page = { goto: vi.fn(), evaluate: vi.fn() };
-        await expect(cmd.func(page, { query: '', limit: 1 })).rejects.toBeInstanceOf(ArgumentError);
-        await expect(cmd.func(page, { query: 'codex', limit: 0 })).rejects.toBeInstanceOf(ArgumentError);
-        await expect(cmd.func(page, { query: 'codex', limit: 1001 })).rejects.toBeInstanceOf(ArgumentError);
-        await expect(cmd.func(page, { query: 'codex', limit: 1, type: 'video' })).rejects.toBeInstanceOf(ArgumentError);
+        const page = { goto: vi.fn(), get: vi.fn() };
+        await expect(runCommand(cmd, page, { query: '', limit: 1 })).rejects.toBeInstanceOf(ArgumentError);
+        await expect(runCommand(cmd, page, { query: 'codex', limit: 0 })).rejects.toBeInstanceOf(ArgumentError);
+        await expect(runCommand(cmd, page, { query: 'codex', limit: 1001 })).rejects.toBeInstanceOf(ArgumentError);
+        await expect(runCommand(cmd, page, { query: 'codex', limit: 1, type: 'video' })).rejects.toBeInstanceOf(ArgumentError);
         expect(page.goto).not.toHaveBeenCalled();
-        expect(page.evaluate).not.toHaveBeenCalled();
+        expect(page.get).not.toHaveBeenCalled();
     });
 
     it('unwraps Browser Bridge envelopes and fails typed on malformed payloads', () => {
@@ -180,19 +180,26 @@ describe('zhihu search', () => {
         const cmd = getRegistry().get('zhihu/search');
         const malformedNextPage = {
             goto: vi.fn().mockResolvedValue(undefined),
-            evaluate: vi.fn().mockResolvedValue({
+            get: vi.fn().mockResolvedValue({
                 data: [],
                 paging: { is_end: false, next: 'https://evil.example/search_v3?offset=20' },
             }),
         };
-        await expect(cmd.func(malformedNextPage, { query: 'codex', limit: 3 }))
+        await expect(runCommand(cmd, malformedNextPage, { query: 'codex', limit: 3 }))
             .rejects.toBeInstanceOf(CommandExecutionError);
 
         const emptyPage = {
             goto: vi.fn().mockResolvedValue(undefined),
-            evaluate: vi.fn().mockResolvedValue({ data: [], paging: { is_end: true } }),
+            get: vi.fn().mockResolvedValue({ data: [], paging: { is_end: true } }),
         };
-        await expect(cmd.func(emptyPage, { query: 'codex', limit: 3 }))
+        await expect(runCommand(cmd, emptyPage, { query: 'codex', limit: 3 }))
             .rejects.toBeInstanceOf(EmptyResultError);
     });
 });
+
+vi.mock('./api.js', () => ({ createZhihuClient: vi.fn() }));
+
+async function runCommand(command, api, kwargs) {
+    createZhihuClient.mockResolvedValue(api);
+    return command.func(kwargs);
+}

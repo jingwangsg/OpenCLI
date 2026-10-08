@@ -23,6 +23,18 @@ vi.mock('./output.js', () => ({
 import { registerCommandToProgram } from './commanderAdapter.js';
 
 describe('commanderAdapter arg passing', () => {
+  it.each([
+    ['--profile', 'edge', 'zhihu', 'hot'],
+    ['zhihu', 'hot', '--profile', 'edge'],
+  ])('passes profile selection to API adapters: %j', async (...argv) => {
+    const program = new Command().option('--profile <name>');
+    registerCommandToProgram(program.command('zhihu'), {
+      site: 'zhihu', name: 'hot', access: 'read', description: 'API hot list', browser: false,
+      args: [{ name: 'profile', valueRequired: true }], func: vi.fn(),
+    });
+    await program.parseAsync(['node', 'opencli', ...argv]);
+    expect(mockExecuteCommand.mock.calls.at(-1)?.[1]).toMatchObject({ profile: 'edge' });
+  });
   const cmd: CliCommand = {
     site: 'paperreview',
     name: 'submit', access: 'read',

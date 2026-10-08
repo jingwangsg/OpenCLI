@@ -860,22 +860,6 @@
     ]
   },
   {
-    "command": "zhihu/hot",
-    "file": "clis/zhihu/hot.js",
-    "missing": [
-      "answer_count",
-      "follower_count",
-      "url"
-    ]
-  },
-  {
-    "command": "zhihu/hot",
-    "file": "clis/zhihu/hot.js",
-    "missing": [
-      "url"
-    ]
-  },
-  {
     "command": "zsxq/groups",
     "file": "clis/zsxq/groups.js",
     "missing": [

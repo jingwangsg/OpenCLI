@@ -1,3 +1,4 @@
+import { createZhihuClient } from './api.js';
 import { cli, Strategy } from '@jackwener/opencli/registry';
 import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
 import { stripHtml } from './text.js';
@@ -129,17 +130,20 @@ cli({
     description: '知乎搜索',
     domain: 'www.zhihu.com',
     strategy: Strategy.COOKIE,
+    browser: false,
+    navigateBefore: false,
     args: [
+        { name: 'profile', valueRequired: true, help: 'Browser profile alias or context ID' },
         { name: 'query', required: true, positional: true, help: 'Search query' },
         { name: 'limit', type: 'int', default: 10, help: 'Number of results (max 1000; use normal-sized requests)' },
         { name: 'type', default: 'all', choices: TYPES, help: 'Result type: all, answer, article, or question' },
     ],
     columns: ['rank', 'title', 'type', 'author', 'votes', 'url'],
-    func: async (page, kwargs) => {
+    func: async (kwargs) => {
         const query = requireQuery(kwargs.query);
         const resultLimit = parseLimit(kwargs.limit);
         const type = requireType(kwargs.type);
-        await page.goto('https://www.zhihu.com');
+        const api = await createZhihuClient(kwargs.profile);
         let url = 'https://www.zhihu.com/api/v4/search_v3'
             + `?q=${encodeURIComponent(query)}&t=general&offset=0&limit=${PAGE_SIZE}`;
         const results = [];
@@ -147,17 +151,7 @@ cli({
         const visited = new Set();
         while (url && results.length < resultLimit && !visited.has(url)) {
             visited.add(url);
-            const data = requireSearchPayload(await page.evaluate(`
-      (async () => {
-        try {
-          const r = await fetch(${JSON.stringify(url)}, { credentials: 'include' });
-          if (!r.ok) return { __httpError: r.status };
-          return await r.json();
-        } catch (err) {
-          return { __fetchError: err?.message || String(err) };
-        }
-      })()
-    `), url);
+            const data = requireSearchPayload(await api.get(url), url);
             for (const item of data.data) {
                 const rawType = item?.object?.type;
                 if (type !== 'all' && rawType && rawType !== type) continue;

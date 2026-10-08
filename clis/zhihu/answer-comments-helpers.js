@@ -33,27 +33,8 @@ function normalizePageUrl(value, path, requiredParams) {
     }
 }
 async function fetchCommentPage(page, url, label, notFoundDetail = '') {
-    const evaluated = await page.evaluate(async (requestUrl) => {
-        const response = await fetch(requestUrl, { credentials: 'include' });
-        let body;
-        try {
-            body = await response.json();
-        } catch (error) {
-            return { __httpStatus: response.status, __malformedJson: error instanceof Error ? error.message : String(error) };
-        }
-        const error = body?.error && typeof body.error === 'object' ? body.error : null;
-        const result = {
-            __httpStatus: response.status,
-            __errorCode: error?.code ?? body?.error_code ?? '',
-            __errorMessage: error?.message || body?.error_msg || '',
-            __needLogin: error?.need_login === true || body?.need_login === true,
-        };
-        return !response.ok || result.__errorCode || result.__errorMessage || result.__needLogin ? result : body;
-    }, url).catch((error) => {
-        throw new CommandExecutionError(
-            `Zhihu ${label} request failed: ${error instanceof Error ? error.message : String(error)}`,
-            'Try again later or rerun with -v for more detail.',
-        );
+    const evaluated = await page.get(url).catch((error) => {
+        throw new CommandExecutionError(`Zhihu ${label} request failed: ${error.message || String(error)}`);
     });
     const payload = unwrapEvaluateResult(evaluated);
     if (payload?.__malformedJson) {

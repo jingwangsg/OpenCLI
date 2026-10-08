@@ -1,3 +1,4 @@
+import { createZhihuClient } from './api.js';
 import { cli, Strategy } from '@jackwener/opencli/registry';
 import { AuthRequiredError, CliError } from '@jackwener/opencli/errors';
 
@@ -32,29 +33,26 @@ cli({
     description: '知乎首页推荐',
     domain: 'www.zhihu.com',
     strategy: Strategy.COOKIE,
+    browser: false,
+    navigateBefore: false,
     args: [
+        { name: 'profile', valueRequired: true, help: 'Browser profile alias or context ID' },
         { name: 'limit', type: 'int', default: 20, help: 'Number of items to return (max 1000; use normal-sized requests)' },
     ],
     columns: ['rank', 'type', 'title', 'author', 'votes', 'url'],
-    func: async (page, kwargs) => {
+    func: async (kwargs) => {
         const itemLimit = Number(kwargs.limit ?? 20);
         if (!Number.isInteger(itemLimit) || itemLimit <= 0 || itemLimit > MAX_LIMIT) {
             throw new CliError('INVALID_INPUT', `Limit must be a positive integer no greater than ${MAX_LIMIT}`, 'Use a normal-sized limit to avoid slow requests or Zhihu risk controls');
         }
-        await page.goto('https://www.zhihu.com');
+        const api = await createZhihuClient(kwargs.profile);
         let url = 'https://www.zhihu.com/api/v3/feed/topstory/recommend?limit=10&desktop=true';
         const items = [];
         const seen = new Set();
         const visited = new Set();
         while (url && items.length < itemLimit && !visited.has(url)) {
             visited.add(url);
-            const data = await page.evaluate(`
-      (async () => {
-        const r = await fetch(${JSON.stringify(url)}, { credentials: 'include' });
-        if (!r.ok) return { __httpError: r.status };
-        return await r.json();
-      })()
-    `);
+            const data = await api.get(url);
             if (!data || data.__httpError) {
                 const status = data?.__httpError;
                 if (status === 401 || status === 403) {

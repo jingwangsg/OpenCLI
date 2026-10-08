@@ -50092,8 +50092,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "id",
         "type": "str",
@@ -50144,7 +50151,7 @@
     "type": "js",
     "modulePath": "zhihu/answer-comments.js",
     "sourceFile": "zhihu/answer-comments.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50153,8 +50160,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "id",
         "type": "str",
@@ -50185,7 +50199,34 @@
     "type": "js",
     "modulePath": "zhihu/answer-detail.js",
     "sourceFile": "zhihu/answer-detail.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
+  },
+  {
+    "site": "zhihu",
+    "name": "auth-sync",
+    "description": "Cache the selected profile session for Zhihu API commands without a browser",
+    "access": "read",
+    "domain": "www.zhihu.com",
+    "strategy": "cookie",
+    "browser": false,
+    "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      }
+    ],
+    "columns": [
+      "url_token",
+      "name",
+      "uid"
+    ],
+    "type": "js",
+    "modulePath": "zhihu/auth-sync.js",
+    "sourceFile": "zhihu/auth-sync.js",
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50194,8 +50235,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "id",
         "type": "str",
@@ -50230,7 +50278,7 @@
     "type": "js",
     "modulePath": "zhihu/collection.js",
     "sourceFile": "zhihu/collection.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50239,8 +50287,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "limit",
         "type": "int",
@@ -50259,7 +50314,7 @@
     "type": "js",
     "modulePath": "zhihu/collections.js",
     "sourceFile": "zhihu/collections.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50444,8 +50499,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "user",
         "type": "string",
@@ -50472,7 +50534,7 @@
     "type": "js",
     "modulePath": "zhihu/followers.js",
     "sourceFile": "zhihu/followers.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50481,8 +50543,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "user",
         "type": "string",
@@ -50509,7 +50578,7 @@
     "type": "js",
     "modulePath": "zhihu/following.js",
     "sourceFile": "zhihu/following.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50518,8 +50587,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "limit",
         "type": "int",
@@ -50532,12 +50608,13 @@
       "rank",
       "title",
       "heat",
-      "answers"
+      "answers",
+      "url"
     ],
     "type": "js",
     "modulePath": "zhihu/hot.js",
     "sourceFile": "zhihu/hot.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50613,8 +50690,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "user",
         "type": "string",
@@ -50643,7 +50727,7 @@
     "type": "js",
     "modulePath": "zhihu/pins.js",
     "sourceFile": "zhihu/pins.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50652,8 +50736,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "id",
         "type": "str",
@@ -50691,7 +50782,7 @@
     "type": "js",
     "modulePath": "zhihu/question.js",
     "sourceFile": "zhihu/question.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50700,8 +50791,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "limit",
         "type": "int",
@@ -50721,7 +50819,7 @@
     "type": "js",
     "modulePath": "zhihu/recommend.js",
     "sourceFile": "zhihu/recommend.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50730,8 +50828,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "query",
         "type": "str",
@@ -50771,7 +50876,7 @@
     "type": "js",
     "modulePath": "zhihu/search.js",
     "sourceFile": "zhihu/search.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50780,8 +50885,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "user",
         "type": "string",
@@ -50804,7 +50916,7 @@
     "type": "js",
     "modulePath": "zhihu/user.js",
     "sourceFile": "zhihu/user.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50813,8 +50925,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "user",
         "type": "string",
@@ -50841,7 +50960,7 @@
     "type": "js",
     "modulePath": "zhihu/user-answers.js",
     "sourceFile": "zhihu/user-answers.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50850,8 +50969,15 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
+    "browser": false,
     "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      },
       {
         "name": "user",
         "type": "string",
@@ -50878,7 +51004,7 @@
     "type": "js",
     "modulePath": "zhihu/user-articles.js",
     "sourceFile": "zhihu/user-articles.js",
-    "navigateBefore": "https://www.zhihu.com"
+    "navigateBefore": false
   },
   {
     "site": "zhihu",
@@ -50887,8 +51013,16 @@
     "access": "read",
     "domain": "www.zhihu.com",
     "strategy": "cookie",
-    "browser": true,
-    "args": [],
+    "browser": false,
+    "args": [
+      {
+        "name": "profile",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Browser profile alias or context ID"
+      }
+    ],
     "columns": [
       "logged_in",
       "site",

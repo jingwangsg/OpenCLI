@@ -2,8 +2,6 @@
 
 Run `opencli list` for the live registry.
 
-NVIDIA Singapore desk reservations: [nvfinder flexdesk](./browser/nvfinder.md).
-
 ## Browser Adapters
 
 | Site                                     | Commands                                                                                                                                                                                                                                                         | Mode                                |
